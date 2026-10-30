@@ -30,6 +30,9 @@ test-media/
 ffmpeg/build/
 ffmpeg/prebuilt/
 
+# 本地第三方工具（dovi_tool 等）
+tools/
+
 # 签名与密钥
 *.jks
 *.keystore

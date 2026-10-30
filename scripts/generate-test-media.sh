@@ -8,6 +8,10 @@
 #
 # 默认使用桌面版 FFmpeg 生成小体积样本，覆盖 MVP 格式矩阵中的容器与编码组合，
 # 生成结束后在输出目录写入 MANIFEST.txt（ffprobe 元数据快照）。
+#
+# Dolby Vision 样本依赖 dovi_tool（tools/dovi_tool/dovi_tool.exe，不纳入仓库）：
+#   https://github.com/quietvoid/dovi_tool/releases
+# 缺少该工具时会跳过 DV 样本并给出提示。
 
 set -uo pipefail
 
@@ -20,6 +24,7 @@ case "$FFMPEG" in
   *)     FFPROBE_DEFAULT="${FFMPEG%ffmpeg}ffprobe" ;;
 esac
 FFPROBE="${FFPROBE:-$FFPROBE_DEFAULT}"
+DOVI_TOOL="${DOVI_TOOL:-$ROOT/tools/dovi_tool/dovi_tool.exe}"
 
 OUT_DIR="${1:-test-media}"
 case "$OUT_DIR" in
@@ -77,6 +82,61 @@ gen mp4_av1_aac.mp4         -c:v libsvtav1 -preset 10 -crf 35 -pix_fmt yuv420p -
 gen mp4_hevc10_aac.mp4      -vf format=yuv420p10le -c:v libx265 -preset fast -crf 28 -c:a aac -b:a 128k
 gen mp4_hevc_hdr_hlg.mp4    -vf "format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc:range=tv" \
                             -c:v libx265 -preset fast -crf 28 -c:a aac -b:a 128k -movflags +write_colr
+
+# Dolby Vision Profile 8.4（iPhone 同规格：HEVC 10-bit + HLG 基础层 + RPU）
+gen_dv84() {
+  local name="mp4_hevc_dv84_hlg.mp4"
+  local out="$OUT_DIR/$name"
+  local tmp="$OUT_DIR/.dv84"
+
+  if [ -f "$out" ] && [ "${FORCE:-0}" != "1" ]; then
+    printf '  skip  %s\n' "$name"; OK=$((OK + 1)); return 0
+  fi
+  if ! command -v "$DOVI_TOOL" >/dev/null 2>&1 && [ ! -x "$DOVI_TOOL" ]; then
+    printf '  skip  %-34s 缺少 dovi_tool（%s）\n' "$name" "$DOVI_TOOL"
+    return 0
+  fi
+
+  local frames=$((DURATION * FPS))
+  rm -rf "$tmp" && mkdir -p "$tmp"
+  cat >"$tmp/cfg.json" <<EOF
+{
+  "cm_version": "V29",
+  "profile": "8.4",
+  "length": ${frames},
+  "shots": [
+    { "start": 0, "duration": ${frames},
+      "metadata_blocks": [
+        { "Level1": { "min_pq": 7, "max_pq": 3000, "avg_pq": 1500 } }
+      ]
+    }
+  ]
+}
+EOF
+
+  # 1) HEVC 10-bit HLG 基础层  2) 生成 RPU  3) 注入  4) 封装为 MP4
+  if "$FFMPEG" -hide_banner -loglevel error -y \
+      -f lavfi -i "testsrc2=size=${W}x${H}:rate=${FPS}:duration=${DURATION}" \
+      -vf "format=yuv420p10le,setparams=color_primaries=bt2020:color_trc=arib-std-b67:colorspace=bt2020nc:range=tv" \
+      -c:v libx265 -preset fast -crf 28 -x265-params log-level=error \
+      -f hevc "$tmp/base.hevc" 2>"$tmp/encode.log" \
+    && "$DOVI_TOOL" generate -j "$tmp/cfg.json" -o "$tmp/rpu.bin" >/dev/null 2>"$tmp/gen.log" \
+    && "$DOVI_TOOL" inject-rpu -i "$tmp/base.hevc" --rpu-in "$tmp/rpu.bin" -o "$tmp/dv.hevc" >/dev/null 2>"$tmp/inject.log" \
+    && "$FFMPEG" -hide_banner -loglevel error -y \
+      -i "$tmp/dv.hevc" \
+      -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=${DURATION}" \
+      -map 0:v -map 1:a -c:v copy -bsf:v dovi_rpu=compression=none \
+      -c:a aac -b:a 128k -tag:v hvc1 -strict unofficial \
+      -movflags +write_colr "$out" 2>"$tmp/mux.log"; then
+    printf '  ok    %-34s %s (DV 8.4 + HLG)\n' "$name" "$(du -h "$out" | cut -f1)"
+    rm -rf "$tmp"; OK=$((OK + 1))
+  else
+    printf '  FAIL  %s\n' "$name"
+    cat "$tmp"/*.log 2>/dev/null | tail -5 | sed 's/^/        /'
+    rm -rf "$tmp"; rm -f "$out"; FAILED+=("$name")
+  fi
+}
+gen_dv84
 gen mp4_h264_aac_vertical.mp4 -vf scale=360:640,format=yuv420p -c:v libx264 -preset veryfast -crf 23 -c:a aac -b:a 128k
 # 旋转样本：-metadata rotate= 在新版 FFmpeg 已不再写入显示矩阵，需用 -display_rotation 重封装
 gen_rotated() {
@@ -133,6 +193,14 @@ MANIFEST="$OUT_DIR/MANIFEST.txt"
     vinfo="$("$FFPROBE" -v error -select_streams v:0 \
       -show_entries stream=codec_name,width,height,pix_fmt -of csv=p=0 "$f" 2>/dev/null | head -1)"
     vinfo="${vinfo%,}"
+    dv="$("$FFPROBE" -v error -select_streams v:0 \
+      -show_entries stream_side_data=dv_profile,dv_bl_signal_compatibility_id \
+      -of csv=p=0 "$f" 2>/dev/null | head -1)"
+    case "$dv" in
+      "") ;;
+      *,*) vinfo="$vinfo DV(profile=${dv%%,*},compat=${dv#*,})" ;;
+      *)   vinfo="$vinfo DV(profile=$dv)" ;;
+    esac
     ainfo="$("$FFPROBE" -v error -select_streams a:0 \
       -show_entries stream=codec_name -of csv=p=0 "$f" 2>/dev/null | head -1)"
     dur="$("$FFPROBE" -v error -show_entries format=duration -of csv=p=0 "$f" 2>/dev/null | head -1)"

@@ -60,6 +60,7 @@ MVP 不拆多模块；FFmpeg JNI 明显膨胀后再拆 `:ffmpeg`。
 
 - adb：`C:/software/platform-tools/adb.exe`（已连接真机：Android 15 / API 35 / arm64-v8a）
 - 桌面 ffmpeg（生成测试素材）：`C:/software/ffmpeg-9.0.1-full_build/bin/ffmpeg.exe`
+- Dolby Vision 素材依赖 `tools/dovi_tool/dovi_tool.exe`（不纳入仓库）；缺失时脚本自动跳过 DV 样本
 - SDK、NDK 路径通过 `local.properties` 或环境变量 `ANDROID_HOME` 提供，不提交到仓库
 
 ## 硬性约束
@@ -72,6 +73,7 @@ MVP 不拆多模块；FFmpeg JNI 明显膨胀后再拆 `:ffmpeg`。
 - 禁止把整个视频文件读入内存；全程流式处理
 - 转换前查询 `MediaCodecList` 能力，失败自动回退软件编码
 - 新增格式/编码时必须同步更新格式矩阵与 `scripts/` 下的测试素材
+- Dolby Vision 封装：FFmpeg 输出必须用 `.mp4` 扩展（`.mov` 会丢 `dvvC` 配置盒），并加 `-bsf:v dovi_rpu -strict unofficial`；`-shortest` 会导致音轨被丢弃
 
 ## 代码风格
 
