@@ -30,6 +30,7 @@ data class ConvertUiState(
     val loading: Boolean = true,
     val info: VideoInfo? = null,
     val error: String? = null,
+    val scanWarning: String? = null,
     val container: ContainerOption? = null,
     val videoCodec: CodecOption? = null,
     val audioCodec: CodecOption? = null,
@@ -43,12 +44,14 @@ class ConvertViewModel(
 ) : AndroidViewModel(application) {
 
     private val sourceUri: Uri? = savedStateHandle.get<String>("uri")?.let(Uri::parse)
+    private val scanMode: Boolean = savedStateHandle.get<Boolean>("scan") ?: false
+    private val scanReason: String = savedStateHandle.get<String>("reason").orEmpty()
 
     private val _uiState = MutableStateFlow(ConvertUiState())
     val uiState: StateFlow<ConvertUiState> = _uiState.asStateFlow()
 
     val route: StateFlow<EngineRoute?> = uiState
-        .map { state -> state.toSpec()?.let(EngineRouter::route) }
+        .map { state -> state.toSpec()?.let { EngineRouter.route(it, scanMode) } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun currentSpec(): ConversionSpec? = _uiState.value.toSpec()
@@ -60,7 +63,14 @@ class ConvertViewModel(
         } else {
             viewModelScope.launch {
                 val result = withContext(Dispatchers.IO) {
-                    runCatching { MediaProbe.probe(getApplication(), uri) }
+                    runCatching {
+                        try {
+                            MediaProbe.probe(getApplication(), uri)
+                        } catch (error: Exception) {
+                            if (!scanMode) throw error
+                            MediaProbe.probeLenient(getApplication(), uri)
+                        }
+                    }
                 }
                 result
                     .onSuccess(::onProbed)
@@ -79,6 +89,11 @@ class ConvertViewModel(
             it.copy(
                 loading = false,
                 error = null,
+                scanWarning = if (scanMode) {
+                    scanReason.ifBlank { "系统解码器无法解码该视频" }
+                } else {
+                    null
+                },
                 info = info,
                 container = container,
                 videoCodec = container.videoCodecs.first(),

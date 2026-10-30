@@ -40,6 +40,63 @@ object MediaProbe {
         }
     }
 
+    /**
+     * 扫描失败的文件可能无法被 MediaMetadataRetriever 打开，但仍需进入格式选择页，
+     * 因此这里只用 MediaExtractor 尽力取元数据，失败时保留文件名与大小。
+     */
+    fun probeLenient(context: Context, uri: Uri): VideoInfo {
+        val displayName = readDisplayName(context, uri)
+        val size = readSize(context, uri)
+        var videoMime: String? = null
+        var audioMime: String? = null
+        var durationMs: Long? = null
+        var width: Int? = null
+        var height: Int? = null
+        var rotationDegrees = 0
+
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(context, uri, null)
+            for (index in 0 until extractor.trackCount) {
+                val format = extractor.getTrackFormat(index)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: continue
+                if (durationMs == null) {
+                    durationMs = runCatching {
+                        format.getLong(MediaFormat.KEY_DURATION) / 1_000
+                    }.getOrNull()
+                }
+                if (videoMime == null && mime.startsWith("video/")) {
+                    videoMime = mime
+                    width = runCatching { format.getInteger(MediaFormat.KEY_WIDTH) }.getOrNull()
+                    height = runCatching { format.getInteger(MediaFormat.KEY_HEIGHT) }.getOrNull()
+                    rotationDegrees = runCatching {
+                        format.getInteger(MediaFormat.KEY_ROTATION)
+                    }.getOrDefault(0)
+                } else if (audioMime == null && mime.startsWith("audio/")) {
+                    audioMime = mime
+                }
+            }
+        } catch (_: RuntimeException) {
+        } catch (_: IOException) {
+        } finally {
+            extractor.release()
+        }
+
+        return VideoInfo(
+            uri = uri,
+            displayName = displayName,
+            sizeBytes = size,
+            durationMs = durationMs,
+            width = width,
+            height = height,
+            rotationDegrees = rotationDegrees,
+            bitrate = null,
+            videoMime = videoMime,
+            audioMime = audioMime,
+            frameRate = null,
+        )
+    }
+
     private fun readDisplayName(context: Context, uri: Uri): String {
         context.contentResolver.query(
             uri,

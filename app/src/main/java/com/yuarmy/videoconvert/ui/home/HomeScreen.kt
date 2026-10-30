@@ -19,6 +19,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -33,6 +34,7 @@ import androidx.compose.ui.unit.dp
 @Composable
 fun HomeScreen(
     onVideoPicked: (Uri) -> Unit,
+    onScan: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
@@ -88,6 +90,16 @@ fun HomeScreen(
                 shape = RoundedCornerShape(16.dp),
             ) {
                 Text("选择视频", style = MaterialTheme.typography.titleMedium)
+            }
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onScan,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Text("扫描解码兼容性", style = MaterialTheme.typography.titleMedium)
             }
             Spacer(Modifier.height(16.dp))
             Text(

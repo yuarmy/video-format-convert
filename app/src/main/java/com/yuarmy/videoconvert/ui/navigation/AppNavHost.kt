@@ -11,15 +11,20 @@ import com.yuarmy.videoconvert.service.ConversionController
 import com.yuarmy.videoconvert.ui.convert.ConvertScreen
 import com.yuarmy.videoconvert.ui.home.HomeScreen
 import com.yuarmy.videoconvert.ui.job.JobScreen
+import com.yuarmy.videoconvert.ui.scan.ScanScreen
 import com.yuarmy.videoconvert.ui.settings.SettingsScreen
 
 object Routes {
     const val HOME = "home"
     const val SETTINGS = "settings"
-    const val CONVERT = "convert?uri={uri}"
+    const val SCAN = "scan"
+    const val CONVERT = "convert?uri={uri}&scan={scan}&reason={reason}"
     const val JOB = "job"
 
-    fun convert(uri: Uri): String = "convert?uri=${Uri.encode(uri.toString())}"
+    fun convert(uri: Uri, scan: Boolean = false, reason: String? = null): String {
+        return "convert?uri=${Uri.encode(uri.toString())}" +
+            "&scan=$scan&reason=${Uri.encode(reason.orEmpty())}"
+    }
 }
 
 @Composable
@@ -30,12 +35,40 @@ fun AppNavHost() {
         composable(Routes.HOME) {
             HomeScreen(
                 onVideoPicked = { uri -> navController.navigate(Routes.convert(uri)) },
+                onScan = { navController.navigate(Routes.SCAN) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
+            )
+        }
+        composable(Routes.SCAN) {
+            ScanScreen(
+                onBack = { navController.popBackStack() },
+                onFileSelected = { failure ->
+                    val reason = buildString {
+                        append(failure.kind.label)
+                        failure.detail?.takeIf { it.isNotBlank() }?.let {
+                            append("：")
+                            append(it)
+                        }
+                    }
+                    navController.navigate(
+                        Routes.convert(failure.file.uri, scan = true, reason = reason),
+                    )
+                },
             )
         }
         composable(
             route = Routes.CONVERT,
-            arguments = listOf(navArgument("uri") { type = NavType.StringType }),
+            arguments = listOf(
+                navArgument("uri") { type = NavType.StringType },
+                navArgument("scan") {
+                    type = NavType.BoolType
+                    defaultValue = false
+                },
+                navArgument("reason") {
+                    type = NavType.StringType
+                    defaultValue = ""
+                },
+            ),
         ) {
             ConvertScreen(
                 onBack = { navController.popBackStack() },

@@ -15,7 +15,7 @@ sealed interface EngineRoute {
 
 object EngineRouter {
 
-    fun route(spec: ConversionSpec): EngineRoute {
+    fun route(spec: ConversionSpec, sourceUndecodable: Boolean = false): EngineRoute {
         if (spec.container.id != "mp4") {
             return EngineRoute.Unsupported(
                 "${spec.container.label} 输出需要 FFmpeg 引擎，将在 M3 接入",
@@ -39,6 +39,12 @@ object EngineRouter {
 
         if (remux) {
             return EngineRoute.Media3(remux = true)
+        }
+
+        if (sourceUndecodable) {
+            return EngineRoute.Unsupported(
+                "系统解码器无法解码该视频，转码需要 FFmpeg 引擎（M3）",
+            )
         }
 
         if (!hasEncoder(targetVideoMime)) {
