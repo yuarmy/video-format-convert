@@ -7,7 +7,8 @@
 一款 Android 视频格式转换 App：用户选择本地视频，指定目标容器/编码/分辨率/码率，App 转换后保存到相册。个人自用 / 开源项目，MVP 只做核心格式转换。
 
 - 技术栈：Kotlin + Jetpack Compose（Material 3），单 Activity
-- minSdk 26，targetSdk / compileSdk 36
+- minSdk 26，targetSdk 36，compileSdk 37（Compose 1.12 / Lifecycle 2.11 要求）
+- 构建：Gradle 9.6.0 + AGP 9.5.0；AGP 9 内置 Kotlin，不要再应用 `kotlin-android` 插件
 - 授权：开源。可以使用 GPL 版 FFmpeg（含 x264/x265/LAME）
 
 ## 转换引擎架构（最重要）
@@ -95,8 +96,8 @@ MVP：容器/编码/分辨率/码率/帧率转换、remux、任务队列、进�
 
 ## 路线图状态
 
-- [ ] M0 环境：JDK 21、Android Studio、SDK 36、NDK r28、CMake
-- [ ] M1 骨架：Compose 导航、文件选择、元数据探测、配置页
+- [x] M0 环境：JDK 25、Android Studio、SDK 37、NDK r28、CMake
+- [x] M1 骨架：Compose 导航、文件选择、元数据探测、配置页
 - [ ] M2 快路径：Media3Engine、前台服务、进度/取消、MediaStore 保存
 - [ ] M3 全格式：自编译 FFmpeg、JNI 封装、冷门容器与编解码
 - [ ] M4 任务体系：队列、历史、重试、设置项
