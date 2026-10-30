@@ -8,14 +8,20 @@ import androidx.lifecycle.viewModelScope
 import com.yuarmy.videoconvert.data.MediaProbe
 import com.yuarmy.videoconvert.domain.model.CodecOption
 import com.yuarmy.videoconvert.domain.model.ContainerOption
+import com.yuarmy.videoconvert.domain.model.ConversionSpec
 import com.yuarmy.videoconvert.domain.model.FormatCatalog
 import com.yuarmy.videoconvert.domain.model.Quality
 import com.yuarmy.videoconvert.domain.model.ResolutionOption
 import com.yuarmy.videoconvert.domain.model.VideoInfo
+import com.yuarmy.videoconvert.engine.EngineRoute
+import com.yuarmy.videoconvert.engine.EngineRouter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,6 +46,12 @@ class ConvertViewModel(
 
     private val _uiState = MutableStateFlow(ConvertUiState())
     val uiState: StateFlow<ConvertUiState> = _uiState.asStateFlow()
+
+    val route: StateFlow<EngineRoute?> = uiState
+        .map { state -> state.toSpec()?.let(EngineRouter::route) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    fun currentSpec(): ConversionSpec? = _uiState.value.toSpec()
 
     init {
         val uri = sourceUri
@@ -100,4 +112,19 @@ class ConvertViewModel(
     fun selectQuality(quality: Quality) {
         _uiState.update { it.copy(quality = quality) }
     }
+}
+
+private fun ConvertUiState.toSpec(): ConversionSpec? {
+    val info = info ?: return null
+    val container = container ?: return null
+    val videoCodec = videoCodec ?: return null
+    val audioCodec = audioCodec ?: return null
+    return ConversionSpec(
+        source = info,
+        container = container,
+        videoCodec = videoCodec,
+        audioCodec = audioCodec,
+        resolution = resolution,
+        quality = quality,
+    )
 }

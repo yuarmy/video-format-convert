@@ -1,5 +1,10 @@
 package com.yuarmy.videoconvert.ui.convert
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,10 +43,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.yuarmy.videoconvert.domain.model.CodecNames
@@ -51,6 +58,8 @@ import com.yuarmy.videoconvert.domain.model.FormatCatalog
 import com.yuarmy.videoconvert.domain.model.Quality
 import com.yuarmy.videoconvert.domain.model.ResolutionOption
 import com.yuarmy.videoconvert.domain.model.VideoInfo
+import com.yuarmy.videoconvert.engine.EngineRoute
+import com.yuarmy.videoconvert.service.ConversionController
 import com.yuarmy.videoconvert.ui.common.formatDuration
 import com.yuarmy.videoconvert.ui.common.formatSize
 import kotlinx.coroutines.launch
@@ -59,11 +68,58 @@ import kotlinx.coroutines.launch
 @Composable
 fun ConvertScreen(
     onBack: () -> Unit,
+    onStarted: () -> Unit,
     viewModel: ConvertViewModel = viewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val route by viewModel.route.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
+    val startConversion: () -> Unit = {
+        val spec = viewModel.currentSpec()
+        when (val currentRoute = route) {
+            null -> Unit
+
+            is EngineRoute.Unsupported -> {
+                scope.launch { snackbarHostState.showSnackbar(currentRoute.reason) }
+            }
+
+            is EngineRoute.Media3 -> {
+                if (spec != null) {
+                    ConversionController.submit(context, spec)
+                    onStarted()
+                }
+            }
+        }
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions(),
+    ) { startConversion() }
+
+    val onStartClick: () -> Unit = {
+        val missing = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.POST_NOTIFICATIONS,
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P &&
+                ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE,
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }
+        if (missing.isEmpty()) startConversion() else permissionLauncher.launch(missing.toTypedArray())
+    }
 
     Scaffold(
         topBar = {
@@ -121,12 +177,9 @@ fun ConvertScreen(
                             onResolution = viewModel::selectResolution,
                             onQuality = viewModel::selectQuality,
                         )
+                        RouteHint(route)
                         Button(
-                            onClick = {
-                                scope.launch {
-                                    snackbarHostState.showSnackbar("转换引擎将在 M2 接入")
-                                }
-                            },
+                            onClick = onStartClick,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(56.dp),
@@ -140,6 +193,30 @@ fun ConvertScreen(
             }
         }
     }
+}
+
+@Composable
+private fun RouteHint(route: EngineRoute?) {
+    val (text, isError) = when (route) {
+        is EngineRoute.Media3 -> {
+            if (route.remux) "将直接流拷贝，无画质损失" to false
+            else "将使用设备硬件编码" to false
+        }
+
+        is EngineRoute.Unsupported -> route.reason to true
+        null -> return
+    }
+    Text(
+        text = text,
+        modifier = Modifier.fillMaxWidth(),
+        style = MaterialTheme.typography.bodySmall,
+        color = if (isError) {
+            MaterialTheme.colorScheme.error
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        textAlign = TextAlign.Center,
+    )
 }
 
 @Composable

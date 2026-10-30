@@ -98,7 +98,7 @@ MVP：容器/编码/分辨率/码率/帧率转换、remux、任务队列、进�
 
 - [x] M0 环境：JDK 25、Android Studio、SDK 37、NDK r28、CMake
 - [x] M1 骨架：Compose 导航、文件选择、元数据探测、配置页
-- [ ] M2 快路径：Media3Engine、前台服务、进度/取消、MediaStore 保存
+- [x] M2 快路径：Media3Engine、前台服务、进度/取消、MediaStore 保存
 - [ ] M3 全格式：自编译 FFmpeg、JNI 封装、冷门容器与编解码
 - [ ] M4 任务体系：队列、历史、重试、设置项
 - [ ] M5 收尾：真机格式矩阵回归、性能、打包、README

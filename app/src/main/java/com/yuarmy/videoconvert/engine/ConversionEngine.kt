@@ -3,6 +3,7 @@ package com.yuarmy.videoconvert.engine
 import android.net.Uri
 import com.yuarmy.videoconvert.domain.model.ConversionSpec
 import com.yuarmy.videoconvert.domain.model.VideoInfo
+import java.io.File
 
 interface ConversionEngine {
     suspend fun probe(uri: Uri): VideoInfo
@@ -19,10 +20,11 @@ data class ConversionProgress(
     val percent: Float,
     val speed: Float? = null,
     val etaMs: Long? = null,
+    val note: String? = null,
 )
 
 sealed interface ConversionResult {
-    data class Success(val outputUri: Uri) : ConversionResult
+    data class Success(val output: File) : ConversionResult
 
     data class Failure(val message: String, val cause: Throwable? = null) : ConversionResult
 
