@@ -45,9 +45,12 @@ app/                 # 单模块起步
   src/main/java/.../service/    前台服务、WorkManager Worker
 ffmpeg/              # 自编译 .so + JNI 源码/脚本
 scripts/             # FFmpeg 构建脚本、测试素材生成脚本
+docs/                # 架构与模块设计文档
 ```
 
 MVP 不拆多模块；FFmpeg JNI 明显膨胀后再拆 `:ffmpeg`。
+
+架构细节、数据模型、路由规则与已知限制见 `docs/design.md`，本文件保持精简。
 
 ## 常用命令
 
