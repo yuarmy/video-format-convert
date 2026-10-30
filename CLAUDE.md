@@ -62,6 +62,9 @@ MVP 不拆多模块；FFmpeg JNI 明显膨胀后再拆 `:ffmpeg`。
 - 桌面 ffmpeg（生成测试素材）：`C:/software/ffmpeg-9.0.1-full_build/bin/ffmpeg.exe`
 - Dolby Vision 素材依赖 `tools/dovi_tool/dovi_tool.exe`（不纳入仓库）；缺失时脚本自动跳过 DV 样本
 - SDK、NDK 路径通过 `local.properties` 或环境变量 `ANDROID_HOME` 提供，不提交到仓库
+- 本机 SDK：`%LOCALAPPDATA%\Android\Sdk`（platform 29/36/37、NDK 28.2/30.0、CMake 4.1.2 已装）
+- 本机无独立 JDK，命令行构建时设 `JAVA_HOME=C:\Program Files\Android\Android Studio\jbr`（JDK 25）
+- SDK 管理使用 `android sdk`（`sdkmanager` 已弃用且本机 wrapper 有权限问题）
 
 ## 硬性约束
 
