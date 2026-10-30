@@ -1,0 +1,41 @@
+# Gradle
+.gradle/
+build/
+*/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# 本地环境（SDK 路径等）
+local.properties
+
+# Android Studio / IntelliJ
+.idea/
+*.iml
+captures/
+
+# NDK / CMake 产物
+.externalNativeBuild/
+.cxx/
+
+# Kotlin
+.kotlin/
+*.hprof
+
+# 测试与构建生成物
+test-media/
+*.apk
+*.aab
+*.log
+
+# FFmpeg 构建中间产物（保留源码与脚本）
+ffmpeg/build/
+ffmpeg/prebuilt/
+
+# 签名与密钥
+*.jks
+*.keystore
+*.p12
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
