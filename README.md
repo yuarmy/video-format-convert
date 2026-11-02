@@ -173,6 +173,31 @@ keyPassword=********
 
 `storeFile` 相对仓库根目录。release 暂不开启 R8（Media3 与 FFmpeg JNI 使用较多反射）；如启用需先补充 keep 规则。
 
+### CI 签名
+
+在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加四个 Repository secret：
+
+| Secret | 内容 |
+| --- | --- |
+| `RELEASE_KEYSTORE_BASE64` | `release.jks` 的 Base64 编码 |
+| `RELEASE_STORE_PASSWORD` | keystore 密码 |
+| `RELEASE_KEY_ALIAS` | 密钥别名，例如 `video-convert` |
+| `RELEASE_KEY_PASSWORD` | key 密码 |
+
+本地生成 Base64：
+
+```bash
+# Git Bash
+base64 -w0 release.jks
+```
+
+```powershell
+# PowerShell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("release.jks"))
+```
+
+`RELEASE_KEYSTORE_BASE64` 存在时，CI 额外构建 `assembleRelease`、用 `apksigner` 校验并上传 `app-release` artifact；未配置时只构建 Debug APK。来自 fork 的 PR 拿不到 Secrets，因此不会触发 Release 构建。runner 是临时环境，`release.jks` 与 `keystore.properties` 不会持久化。
+
 ## 项目结构
 
 ```
