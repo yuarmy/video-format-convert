@@ -42,6 +42,8 @@ import com.yuarmy.videoconvert.engine.ConversionEngine
 import com.yuarmy.videoconvert.engine.ConversionResult
 import com.yuarmy.videoconvert.engine.EngineRoute
 import com.yuarmy.videoconvert.engine.EngineRouter
+import com.yuarmy.videoconvert.engine.FfmpegEngine
+import com.yuarmy.videoconvert.engine.FfmpegNative
 import com.yuarmy.videoconvert.engine.Media3Engine
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -114,53 +116,58 @@ class ConversionService : Service() {
     private suspend fun runConversion(spec: ConversionSpec) {
         var output: File? = null
         try {
-            when (val route = EngineRouter.route(spec)) {
+            val result = when (val route = EngineRouter.route(spec)) {
                 is EngineRoute.Unsupported -> {
                     ConversionController.publish(JobState.Failed(route.reason))
+                    return
                 }
 
                 is EngineRoute.Media3 -> {
-                    val media3Engine = Media3Engine(this, route.remux)
-                    engine = media3Engine
-                    ConversionController.publish(JobState.Running(0f))
+                    val primary = execute(Media3Engine(this, route.remux), spec, defaultNote = null)
+                    // Media3 运行期才失败的场景（编码器初始化失败、源容器不受支持）
+                    // 统一回退到 FFmpeg，避免让用户再点一次。
+                    if (primary is ConversionResult.Failure &&
+                        !cancelRequested &&
+                        FfmpegNative.available
+                    ) {
+                        execute(
+                            FfmpegEngine(this),
+                            spec,
+                            defaultNote = "硬件编码不可用，已切换 FFmpeg 软件编码",
+                        )
+                    } else {
+                        primary
+                    }
+                }
 
-                    val result = media3Engine.convert(spec) { progress ->
-                        val percent = progress.percent.coerceIn(0f, 1f)
-                        ConversionController.publish(JobState.Running(percent, progress.note))
-                        updateNotification(
-                            percent = (percent * 100).roundToInt(),
-                            text = "正在转换",
-                            note = progress.note,
+                is EngineRoute.Ffmpeg -> execute(FfmpegEngine(this), spec, route.note)
+            }
+
+            when (result) {
+                is ConversionResult.Success -> {
+                    output = result.output
+                    ConversionController.publish(JobState.Saving)
+                    updateNotification(100, "正在保存到相册", indeterminate = true)
+                    val displayName = outputDisplayName(spec)
+                    val savedUri = withContext(Dispatchers.IO) {
+                        MediaStoreSaver.save(
+                            context = this@ConversionService,
+                            source = result.output,
+                            displayName = displayName,
+                            mimeType = mimeTypeFor(spec),
                         )
                     }
+                    ConversionController.publish(JobState.Success(savedUri, displayName))
+                }
 
-                    when (result) {
-                        is ConversionResult.Success -> {
-                            output = result.output
-                            ConversionController.publish(JobState.Saving)
-                            updateNotification(100, "正在保存到相册", indeterminate = true)
-                            val displayName = outputDisplayName(spec)
-                            val savedUri = withContext(Dispatchers.IO) {
-                                MediaStoreSaver.save(
-                                    context = this@ConversionService,
-                                    source = result.output,
-                                    displayName = displayName,
-                                    mimeType = mimeTypeFor(spec),
-                                )
-                            }
-                            ConversionController.publish(JobState.Success(savedUri, displayName))
-                        }
+                is ConversionResult.Failure -> {
+                    ConversionController.publish(
+                        if (cancelRequested) JobState.Cancelled else JobState.Failed(result.message),
+                    )
+                }
 
-                        is ConversionResult.Failure -> {
-                            ConversionController.publish(
-                                if (cancelRequested) JobState.Cancelled else JobState.Failed(result.message),
-                            )
-                        }
-
-                        ConversionResult.Cancelled -> {
-                            ConversionController.publish(JobState.Cancelled)
-                        }
-                    }
+                ConversionResult.Cancelled -> {
+                    ConversionController.publish(JobState.Cancelled)
                 }
             }
         } catch (cancelled: CancellationException) {
@@ -177,6 +184,27 @@ class ConversionService : Service() {
                 stopSelf()
             }
         }
+    }
+
+    private suspend fun execute(
+        conversionEngine: ConversionEngine,
+        spec: ConversionSpec,
+        defaultNote: String?,
+    ): ConversionResult {
+        engine = conversionEngine
+        ConversionController.publish(JobState.Running(0f, defaultNote))
+        val result = conversionEngine.convert(spec) { progress ->
+            val percent = progress.percent.coerceIn(0f, 1f)
+            val note = progress.note ?: defaultNote
+            ConversionController.publish(JobState.Running(percent, note))
+            updateNotification(
+                percent = (percent * 100).roundToInt(),
+                text = "正在转换",
+                note = note,
+            )
+        }
+        engine = null
+        return result
     }
 
     private fun outputDisplayName(spec: ConversionSpec): String {

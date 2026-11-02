@@ -34,6 +34,7 @@ import com.yuarmy.videoconvert.engine.EngineRoute
 import com.yuarmy.videoconvert.engine.EngineRouter
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -99,20 +100,22 @@ class VideoDecodeScannerTest {
     }
 
     @Test
-    fun route_shouldOnlyAllowRemuxForUndecodableSource() {
+    fun route_shouldSendUndecodableSourceToFfmpeg() {
         val remuxSpec = spec(
             resolution = FormatCatalog.resolutions.first(),
             quality = Quality.AUTO,
-        )
-        val remuxRoute = EngineRouter.route(remuxSpec, sourceUndecodable = true)
-        assertTrue(remuxRoute is EngineRoute.Media3)
-        assertTrue((remuxRoute as EngineRoute.Media3).remux)
+        ).copy(sourceUndecodable = true)
+        val remuxRoute = EngineRouter.route(remuxSpec)
+        assertTrue(remuxRoute is EngineRoute.Ffmpeg)
+        assertTrue((remuxRoute as EngineRoute.Ffmpeg).remux)
 
         val transcodeSpec = spec(
             resolution = ResolutionOption(480, "480p"),
             quality = Quality.BALANCED,
-        )
-        assertTrue(EngineRouter.route(transcodeSpec, sourceUndecodable = true) is EngineRoute.Unsupported)
+        ).copy(sourceUndecodable = true)
+        val transcodeRoute = EngineRouter.route(transcodeSpec)
+        assertTrue(transcodeRoute is EngineRoute.Ffmpeg)
+        assertFalse((transcodeRoute as EngineRoute.Ffmpeg).remux)
     }
 
     private fun spec(resolution: ResolutionOption, quality: Quality): ConversionSpec {

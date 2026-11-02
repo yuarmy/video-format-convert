@@ -1,6 +1,6 @@
 # 视频格式转换 App 设计文档
 
-- 状态：随实现更新（当前覆盖 M1–M3.3）
+- 状态：随实现更新（当前覆盖 M1–M3.4）
 - 日期：2026-10-30
 - 适用代码：`app/src/main/java/com/yuarmy/videoconvert`
 
@@ -18,7 +18,7 @@
 | 构建 | Gradle 9.6.0 + AGP 9.5.0 | AGP 9 内置 Kotlin，不应用 `kotlin-android` |
 | SDK | minSdk 26 / targetSdk 36 / compileSdk 37 | Compose 1.12、Lifecycle 2.11 要求 compileSdk 37 |
 | 快路径引擎 | Media3 Transformer 1.11.1 | 硬件编解码 + 流拷贝 |
-| 兜底引擎 | 自编译 GPL FFmpeg（M3.4） | 最小 JNI，不做 ffmpeg-kit 依赖 |
+| 兜底引擎 | 自编译 GPL FFmpeg 9 + 最小 JNI | 复用 fftools CLI，不做 ffmpeg-kit 依赖 |
 | 状态管理 | ViewModel + StateFlow | UI 无业务逻辑 |
 | DI | 手工构造 | MVP 不引入 Hilt |
 
@@ -42,8 +42,8 @@
             ▼
 ┌──────────────── engine ────────────────┐
 │ ConversionEngine（统一接口）           │
-│  ├─ Media3Engine（remux / 转码）       │
-│  └─ FfmpegEngine（M3.4，待接入）       │
+│  ├─ Media3Engine（remux / 硬件转码）   │
+│  └─ FfmpegEngine（流拷贝 / 软件转码）  │
 │ EngineRouter（能力探测 + 路由决策）    │
 └────────────────────────────────────────┘
             │
@@ -105,18 +105,20 @@ data class ConversionSpec(
 
 ### 5.2 路由决策
 
-优先级严格按此顺序（`EngineRouter.route`）：
+`ConversionPlanner.plan(spec)` 先判断视频/音频轨道能否原样拷贝（目标编码与源编码一致、
+质量=自动、不需要缩放；Dolby Vision 源额外要求 `.mp4` + H.265），再由 `EngineRouter.route` 选引擎：
 
 | 顺序 | 条件 | 结果 |
 | --- | --- | --- |
-| 1 | 目标容器 ≠ MP4 | `Unsupported`：需要 FFmpeg |
-| 2 | 目标编码 ∉ {H.264, H.265} | `Unsupported`：快路径只支持这两种 |
-| 3 | 质量=自动 且 不需要缩放 且 源视频编码=目标编码 且 音频为 AAC 或无音频 | `Media3(remux=true)` 流拷贝 |
-| 4 | `sourceUndecodable=true` | `Unsupported`：解码失败源只能流拷贝，转码待 FFmpeg |
-| 5 | 无目标视频编码器 / 无 AAC 编码器 | `Unsupported`：告知将由 FFmpeg 软件编码 |
-| 6 | 其余 | `Media3(remux=false)` 硬件转码 |
+| 1 | 目标容器 ≠ MP4 | `Ffmpeg(remux = plan.remux)` |
+| 2 | `sourceUndecodable=true`（扫描确认系统解码器不可用） | `Ffmpeg(remux = plan.remux)` |
+| 3 | `plan.remux=true` | `Media3(remux=true)` 流拷贝 |
+| 4 | 目标编码 ∈ {H.264, H.265} 且有硬件编码器（需要音频时有 AAC 编码器） | `Media3(remux=false)` 硬件转码 |
+| 5 | 其余 MP4 输出（AV1、无硬件编码器） | `Ffmpeg(remux=false)` |
+| 6 | FFmpeg 原生库无法加载（非 arm64-v8a） | `Unsupported` |
 
 路由为 `Unsupported` 时配置页可用，但点击开始只弹提示，不会启动服务。
+Media3 运行期失败且用户未取消时，服务自动改用 FFmpeg 重试一次，并把提示写入通知。
 
 ### 5.3 Media3 引擎
 
@@ -127,6 +129,18 @@ data class ConversionSpec(
 - **进度**：主线程每 200 ms 轮询 `Transformer.getProgress`，仅当状态为 `PROGRESS_STATE_AVAILABLE` 时上报。
 - **结果**：`Transformer.Listener` 的 `onCompleted` / `onError` 通过 `CompletableDeferred` 回到协程。
 - **取消**：协程取消 → `NonCancellable` 中调用 `transformer.cancel()` → 删除临时文件 → 保持 `CancellationException` 上抛。
+
+### 5.4 FFmpeg 引擎
+
+- **JNI 封装**：`ffmpeg/jni/CMakeLists.txt` 把 FFmpeg 静态库与 fftools 源码（`ffmpeg.c` 以 `main=ffmpeg_main` 改名编译）链接成 `libffmpeg_jni.so`；`FfmpegNative.run()` 阻塞执行一条命令，`cancel()` 置位 native 信号标志中断转码。
+- **输入**：`ContentResolver.openFileDescriptor(uri, "r")` 在整个转换期间保持 fd 打开，命令行传 `/proc/self/fd/N`。
+- **输出**：仍写 `cacheDir/conversions/<timestamp>.<ext>`；Dolby Vision 强制 `.mp4`，避免丢失 `dvvC` 配置盒。
+- **命令**：`FfmpegCommand` 按容器 / 编码 / 质量生成参数。视频 H.264→libx264、H.265→libx265、VP8→libvpx、VP9→libvpx-vp9、AV1→libsvtav1、MPEG-4/2→内置编码器；音频 AAC/MP3/Opus/Vorbis/FLAC/AC-3/PCM 同理。可拷贝的轨道用 `-c:v copy` / `-c:a copy`，缩放用 `-vf scale=-2:H,setsar=1`，MP4/MOV 加 `+faststart`，H.265 打 `hvc1` 标签。
+- **质量**：H.264 / H.265 / VP8 / VP9 / AV1 用 CRF（高质量 / 均衡 / 小体积三档），MPEG-4/2 按目标像素量估算码率。
+- **Dolby Vision**：源 mime 为 `video/dolby-vision`、目标 MP4 + H.265 + 自动质量时视频流拷贝，附 `-bsf:v dovi_rpu -strict unofficial`，且不使用 `-shortest`。
+- **进度**：JNI 把 `av_log` 回调到 Kotlin，解析统计行的 `time=` / `speed=`，按源时长换算百分比与 ETA；源时长未知时从 `Duration:` 行补齐。
+- **取消**：`FfmpegNative.cancel()` 置位信号标志，命令尽快返回非零码，引擎删除半成品并返回 `Cancelled`。
+- **加载失败**：非 arm64-v8a 设备 `System.loadLibrary` 失败，`FfmpegNative.available=false`，路由直接返回 `Unsupported`，不会在转换中途崩溃。
 
 ## 6. 解码兼容性扫描（M3.1–M3.3）
 
@@ -147,7 +161,7 @@ data class ConversionSpec(
 ### 6.2 扫描模式下的特殊处理
 
 - 探测失败不阻塞：`MediaProbe.probe` 抛异常时改用 `probeLenient`，只尽力从 `MediaExtractor` 取轨道信息，保证能进配置页。
-- 配置页顶部显示扫描警告卡片；路由带 `sourceUndecodable=true`，因此只有目标与源兼容时才允许流拷贝，其余给出“需要 FFmpeg”的原因。
+- 配置页顶部显示扫描警告卡片；路由带 `sourceUndecodable=true`，由 FFmpeg 接管（源编码与目标一致时可直接流拷贝，否则软件转码）。
 - 失败分类（`DecodeFailureKind`）：`CONTAINER_UNSUPPORTED`、`NO_VIDEO_TRACK`、`DECODER_MISSING`、`DECODER_INIT_FAILED`、`DECODE_FAILED`。
 
 ## 7. 输出与存储
@@ -170,33 +184,34 @@ data class ConversionSpec(
 | 场景 | 行为 |
 | --- | --- |
 | 路由不可用 | 配置页显示原因，禁止提交 |
-| 硬件编码器缺失 | 路由阶段直接判 `Unsupported`；Media3 运行期失败还会触发编码器回退 |
-| 解码器初始化失败 | Media3 尝试软件编码并提示；扫描阶段则记录为失败项 |
+| 硬件编码器缺失 | 路由阶段直接选 `Ffmpeg(remux=false)` |
+| Media3 运行期失败 | 未取消且 FFmpeg 可用时自动重试一次，通知提示“已切换 FFmpeg 软件编码” |
+| 解码器初始化失败 | 扫描阶段记录为失败项；转换时由 FFmpeg 接管 |
 | 服务启动失败 | `submit` 捕获异常，发布 `Failed`，清空 `pendingSpec` |
 | 保存失败 | 删除 MediaStore 占位记录，发布 `Failed` |
 | 用户取消 | 发布 `Cancelled`，清理临时文件与通知 |
 
 ## 10. 测试策略
 
-- 单元/仪器测试位于 `app/src/androidTest`：`Media3EngineTest` 覆盖探测、流拷贝与转码；`VideoDecodeScannerTest` 覆盖正常文件通过、损坏容器被判为 `CONTAINER_UNSUPPORTED`、解码失败源只允许流拷贝。
+- 仪器测试位于 `app/src/androidTest`：`Media3EngineTest` 覆盖探测、流拷贝、硬件转码、服务与相册写入；`FfmpegEngineTest` 覆盖 native 库加载与编码、命令构建、进度回调、取消、服务级 MKV 输出；`VideoDecodeScannerTest` 覆盖正常文件通过、损坏容器判定与扫描失败源路由。
 - 测试素材由 `scripts/` 用桌面 ffmpeg 生成，覆盖各容器/编码组合；Dolby Vision 样本依赖 `tools/dovi_tool`，缺失时脚本跳过。
 - 回归命令：`./gradlew test`、`./gradlew connectedAndroidTest`、`./gradlew lint`。
 - 真机回归关注：格式矩阵逐项可转换、取消后无残留文件/通知、输出能在相册播放。
 
-## 11. FFmpeg 接入（M3.4，预留）
+## 11. FFmpeg 接入（M3.4）
 
-- 保持 `ConversionEngine` 接口不变，新增 `FfmpegEngine` 实现；`EngineRouter` 在第 1/2/4/5 条分支指向 `EngineRoute.Ffmpeg(reason)`。
-- `content://` 不能直接给 FFmpeg：通过 `ContentResolver.openFileDescriptor` 传 `/proc/self/fd/N`，或临时拷贝到缓存。
-- 输出仍写缓存临时文件，复用 `MediaStoreSaver`。
-- 进度解析 FFmpeg stderr 的 `time=`，取消通过终止进程并删除临时文件。
-- 构建使用 NDK r28+，链接参数带 `-Wl,-z,max-page-size=16384`。
-- Dolby Vision 输出必须用 `.mp4` 扩展并加 `-bsf:v dovi_rpu -strict unofficial`，且不能加 `-shortest`。
-- 需要把“源是否可解码”从导航参数提升为 `ConversionSpec` 或服务入参，否则服务端无法复现扫描模式的路由判断。
+- **构建**：`scripts/ffmpeg-download.sh` 下载并校验源码，`scripts/ffmpeg-build.sh` 交叉编译静态库到 `ffmpeg/prebuilt/<abi>/`；`app/build.gradle.kts` 的 `externalNativeBuild` 调用 `ffmpeg/jni/CMakeLists.txt` 链接出 `libffmpeg_jni.so`。当前产物只覆盖 arm64-v8a，因此 `abiFilters` 也只保留该 ABI。
+- **复用 fftools CLI**：`ffmpeg.c` 编译时把 `main` 改名为 `ffmpeg_main`，JNI 直接调用。FFmpeg 9 的该路径不会 `exit()`；但 `ffmpeg_cleanup` 不会清零 `nb_input_files` / `nb_output_files` / `nb_filtergraphs` / `nb_decoders`，JNI 每次运行前手动复位，避免第二次转换状态错乱。
+- **取消**：CMake 在配置阶段去掉 `ffmpeg.c` 中 `received_sigterm` / `received_nb_signals` 的 `static`，JNI 取消时置 2（大于 `transcode_init_done`），让 AVIO 中断回调与转码循环立即退出。
+- **日志与进度**：`av_log_set_callback` 收到的日志用 `av_log_format_line2` 格式化后回调 Kotlin；FFmpeg 工作线程通过 `AttachCurrentThread` + pthread key 析构自动 detach。进度解析 `time=` / `speed=` 统计行。
+- **链接**：静态库互相引用，使用 `-Wl,--start-group/--end-group`；x265 需要 `c++_static` / `c++abi`；`-Wl,-Bsymbolic` 解决 NEON 汇编数据符号在 .so 中的可抢占重定位；`-Wl,-z,max-page-size=16384` 满足 16KB 页要求。
+- **输入与输出**：`content://` 通过 `/proc/self/fd/N` 交给 FFmpeg；输出写缓存临时文件并复用 `MediaStoreSaver`，结束后清理。
 
 ## 12. 已知限制
 
-- 目前只有 MP4 输出可转换；MKV/MOV/AVI/FLV/TS/WebM 在矩阵中可选但路由返回不可用，等待 FFmpeg。
-- 解码失败的文件目前只能流拷贝到兼容容器，转码同样等待 FFmpeg。
+- FFmpeg 原生库只有 arm64-v8a，其他 ABI 设备只能走 Media3 快路径。
+- x265 为 8-bit 构建，10-bit HDR / 部分 Dolby Vision 源转码时会降到 8-bit；Dolby Vision 原样封装需目标为 MP4 + H.265 + 自动质量。
+- 软件转码速度受设备 CPU 限制，4K 长视频可能明显发热。
 - `ConversionController` 只支持单任务，无队列、无历史、无重试（M4）。
 - 保存阶段会再完整拷贝一次输出文件，大文件有额外 IO 开销。
 - 前台服务运行期若进程被杀，任务不会恢复。
@@ -207,10 +222,11 @@ data class ConversionSpec(
 app/src/main/java/com/yuarmy/videoconvert/
   data/        MediaProbe、VideoDecodeScanner、MediaStoreSaver
   domain/model VideoInfo、ConversionSpec、FormatCatalog、JobState、CodecNames
-  engine/      ConversionEngine、Media3Engine、EngineRouter
+  engine/      ConversionEngine、ConversionPlanner、EngineRouter、
+               Media3Engine、FfmpegEngine、FfmpegNative、FfmpegCommand、FfmpegProgressParser
   service/     ConversionController、ConversionService
   ui/          navigation、home、convert、job、scan、settings、common、theme
-app/src/androidTest/  Media3EngineTest、VideoDecodeScannerTest
+app/src/androidTest/  Media3EngineTest、FfmpegEngineTest、VideoDecodeScannerTest
 scripts/       FFmpeg 构建脚本、测试素材生成脚本
-ffmpeg/        自编译 .so 与 JNI 源码（M3.4）
+ffmpeg/        自编译静态库、JNI 源码与 CMake 构建定义
 ```

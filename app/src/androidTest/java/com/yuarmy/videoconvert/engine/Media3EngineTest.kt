@@ -203,7 +203,7 @@ class Media3EngineTest {
     }
 
     @Test
-    fun route_shouldRejectContainersWithoutFfmpeg() {
+    fun route_shouldUseFfmpegForMkvContainers() {
         val mkv = FormatCatalog.containers.first { it.id == "mkv" }
         val spec = ConversionSpec(
             source = sourceInfo,
@@ -213,7 +213,9 @@ class Media3EngineTest {
             resolution = FormatCatalog.resolutions.first(),
             quality = Quality.AUTO,
         )
-        assertTrue(EngineRouter.route(spec) is EngineRoute.Unsupported)
+        val route = EngineRouter.route(spec)
+        assertTrue(route is EngineRoute.Ffmpeg)
+        assertTrue((route as EngineRoute.Ffmpeg).remux)
     }
 
     private fun spec(resolution: ResolutionOption, quality: Quality): ConversionSpec {

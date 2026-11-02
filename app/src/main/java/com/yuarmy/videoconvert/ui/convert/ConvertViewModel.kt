@@ -70,10 +70,10 @@ class ConvertViewModel(
     val uiState: StateFlow<ConvertUiState> = _uiState.asStateFlow()
 
     val route: StateFlow<EngineRoute?> = uiState
-        .map { state -> state.toSpec()?.let { EngineRouter.route(it, scanMode) } }
+        .map { state -> state.toSpec(scanMode)?.let(EngineRouter::route) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
-    fun currentSpec(): ConversionSpec? = _uiState.value.toSpec()
+    fun currentSpec(): ConversionSpec? = _uiState.value.toSpec(scanMode)
 
     init {
         val uri = sourceUri
@@ -148,7 +148,7 @@ class ConvertViewModel(
     }
 }
 
-private fun ConvertUiState.toSpec(): ConversionSpec? {
+private fun ConvertUiState.toSpec(sourceUndecodable: Boolean): ConversionSpec? {
     val info = info ?: return null
     val container = container ?: return null
     val videoCodec = videoCodec ?: return null
@@ -160,5 +160,6 @@ private fun ConvertUiState.toSpec(): ConversionSpec? {
         audioCodec = audioCodec,
         resolution = resolution,
         quality = quality,
+        sourceUndecodable = sourceUndecodable,
     )
 }

@@ -411,6 +411,20 @@ build_ffmpeg() {
             ${MAKE_SHELL_ARGS[@]+"${MAKE_SHELL_ARGS[@]}"}
 }
 
+# fftools 编译时需要 configure 生成的 config.h / ffversion.h，它们不随
+# make install 安装。复制到 prebuilt/include，这样清掉 build 目录后 JNI 仍能构建。
+copy_generated_headers() {
+    local bld="$BUILD_DIR/$ABI/ffmpeg"
+    [ -f "$bld/config.h" ] || return 0
+    cp -f "$bld/config.h" "$PREFIX/include/config.h"
+    [ -f "$bld/config_components.h" ] && \
+        cp -f "$bld/config_components.h" "$PREFIX/include/config_components.h"
+    if [ -f "$bld/libavutil/ffversion.h" ]; then
+        mkdir -p "$PREFIX/include/libavutil"
+        cp -f "$bld/libavutil/ffversion.h" "$PREFIX/include/libavutil/ffversion.h"
+    fi
+}
+
 write_build_info() {
     local out="$PREBUILT_DIR/$ABI/BUILD_INFO.txt"
     {
@@ -466,6 +480,7 @@ for abi in $ABIS; do
 
     if [ "$DEPS_ONLY" != "1" ]; then
         build_ffmpeg
+        copy_generated_headers
     fi
 
     write_build_info

@@ -12,28 +12,27 @@
 - [x] 前台服务 + 通知进度 + 随时取消
 - [x] 输出写入相册 `Movies/视频转换`（MediaStore，先 `IS_PENDING` 后转正）
 - [x] 扫描目录，列出系统解码器打不开的视频及原因，并为其选择输出格式
-- [ ] 自编译 FFmpeg 兜底：MKV / MOV / AVI / FLV / TS 输出、冷门编码解码（M3.4）
+- [x] 自编译 FFmpeg 兜底：MKV / MOV / AVI / FLV / TS / WebM 输出、冷门编码与失败文件转码（M3.4）
 - [ ] 任务队列、历史记录、重试、设置项（M4）
 
 ## 格式支持
 
 | 输出容器 | 状态 | 可用编码（矩阵） |
 | --- | --- | --- |
-| MP4 | 可用（H.264 / H.265 + AAC） | H.264、H.265、AV1\* |
-| MKV | 需要 FFmpeg | H.264、H.265、VP9、AV1 |
-| WebM | 需要 FFmpeg | VP8、VP9、AV1 |
-| MOV | 需要 FFmpeg | H.264、H.265 |
-| AVI | 需要 FFmpeg | MPEG-4 |
-| FLV | 需要 FFmpeg | H.264 |
-| TS | 需要 FFmpeg | H.264、H.265、MPEG-2 |
-
-\* 矩阵中列出但快路径暂不支持，接入 FFmpeg 后放开。
+| MP4 | 可用（H.264 / H.265 走硬件，AV1 走 FFmpeg） | H.264、H.265、AV1 |
+| MKV | 可用 | H.264、H.265、VP9、AV1 |
+| WebM | 可用 | VP8、VP9、AV1 |
+| MOV | 可用 | H.264、H.265 |
+| AVI | 可用 | MPEG-4 |
+| FLV | 可用 | H.264 |
+| TS | 可用 | H.264、H.265、MPEG-2 |
 
 转换方式按以下优先级自动选择：
 
 1. 目标与源编码、音频兼容且未要求缩放 → **流拷贝**（不重新编码）
-2. 目标为 MP4 且编码为 H.264 / H.265 → **Media3 硬件转码**（编码器不可用时自动回退软件编码）
-3. 其余 → **FFmpeg 兜底**（M3.4 接入中，当前提示暂不可用）
+2. 目标为 MP4 且编码为 H.264 / H.265 → **Media3 硬件转码**
+3. 其余（其他容器、AV1/VP8/VP9/MPEG 编码、扫描确认不可解码的源）→ **FFmpeg 软件转码**
+4. Media3 运行期失败（编码器初始化失败等）→ 自动回退 FFmpeg，并在通知中提示
 
 ## 工作原理
 
@@ -94,8 +93,10 @@ ABIS="arm64-v8a armeabi-v7a" scripts/ffmpeg-build.sh
 | `HOSTCC` | 主机 C 编译器，显式指定时跳过自动探测 |
 
 产物位于 `ffmpeg/prebuilt/<abi>/`：`include/` 头文件、`lib/*.a` 静态库、`BUILD_INFO.txt`
-（记录版本、configure 参数与链接要求）。JNI 层把这些静态库链接成一个 `libffmpeg.so`，链接时必须带
+（记录版本、configure 参数与链接要求）。JNI 层把这些静态库链接成一个 `libffmpeg_jni.so`，链接时必须带
 `-Wl,-z,max-page-size=16384` 以满足 Android 15+ 的 16KB 页要求；x265 依赖 `c++_static` 运行时。
+`app/build.gradle.kts` 通过 `externalNativeBuild` 调用 `ffmpeg/jni/CMakeLists.txt`，
+因此**构建 APK 前必须先运行 `scripts/ffmpeg-build.sh`**，否则 CMake 会提示缺少静态库。
 
 脚本自动定位 NDK r28+、SDK 自带 CMake/Ninja 与 NDK 自带 make；主机没有 `pkg-config` 时使用
 `scripts/lib/pkg-config-shim`。x86 / x86_64 ABI 额外需要 `nasm`。
@@ -122,7 +123,7 @@ Dolby Vision 样本依赖 [dovi_tool](https://github.com/quietvoid/dovi_tool/rel
 
 ```
 app/          单模块应用（ui / domain / engine / data / service）
-ffmpeg/       自编译 .so 与 JNI 源码（M3.4）
+ffmpeg/       自编译静态库、JNI 源码与 CMake 构建脚本
 scripts/      FFmpeg 构建与测试素材生成脚本
 docs/         架构设计文档
 ```
@@ -136,7 +137,7 @@ docs/         架构设计文档
   - [x] M3.1 系统解码扫描
   - [x] M3.2 失败清单
   - [x] M3.3 失败文件的格式选择
-  - [ ] M3.4 FFmpeg 构建与 JNI 封装
+  - [x] M3.4 FFmpeg 构建与 JNI 封装
 - [ ] M4 任务体系：队列、历史、重试、设置项
 - [ ] M5 收尾：真机格式矩阵回归、性能、打包
 

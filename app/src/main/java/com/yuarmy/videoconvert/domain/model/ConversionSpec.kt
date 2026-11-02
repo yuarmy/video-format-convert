@@ -26,4 +26,6 @@ data class ConversionSpec(
     val audioCodec: CodecOption,
     val resolution: ResolutionOption,
     val quality: Quality,
+    // 来自扫描失败清单：系统解码器不可用，必须交给 FFmpeg。
+    val sourceUndecodable: Boolean = false,
 )

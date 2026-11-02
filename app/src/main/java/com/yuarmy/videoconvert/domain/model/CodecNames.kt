@@ -28,12 +28,14 @@ object CodecNames {
         "video/av01" to "AV1",
         "video/mp4v-es" to "MPEG-4",
         "video/mpeg2" to "MPEG-2",
+        "video/dolby-vision" to "Dolby Vision",
         "audio/mp4a-latm" to "AAC",
         "audio/mpeg" to "MP3",
         "audio/opus" to "Opus",
         "audio/vorbis" to "Vorbis",
         "audio/flac" to "FLAC",
         "audio/ac3" to "AC-3",
+        "audio/raw" to "PCM",
     )
 
     fun label(mime: String?): String = when {

@@ -107,7 +107,7 @@ fun ConvertScreen(
                 scope.launch { snackbarHostState.showSnackbar(currentRoute.reason) }
             }
 
-            is EngineRoute.Media3 -> {
+            is EngineRoute.Media3, is EngineRoute.Ffmpeg -> {
                 if (spec != null) {
                     ConversionController.submit(context, spec)
                     onStarted()
@@ -225,6 +225,12 @@ private fun RouteHint(route: EngineRoute?) {
             else "将使用设备硬件编码" to false
         }
 
+        is EngineRoute.Ffmpeg -> when {
+            route.remux -> "将使用 FFmpeg 直接流拷贝，无画质损失" to false
+            route.note != null -> route.note to false
+            else -> "将使用 FFmpeg 软件编码，速度较慢" to false
+        }
+
         is EngineRoute.Unsupported -> route.reason to true
         null -> return
     }
@@ -265,7 +271,7 @@ private fun ScanWarningCard(reason: String) {
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             Text(
-                text = "可直接流拷贝的目标格式仍可转换，其他目标格式需要 FFmpeg 引擎。",
+                text = "将由 FFmpeg 软件解码并转码，速度较慢、耗电与发热更高。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
