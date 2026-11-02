@@ -30,6 +30,7 @@ import com.yuarmy.videoconvert.service.ConversionController
 import com.yuarmy.videoconvert.ui.convert.ConvertScreen
 import com.yuarmy.videoconvert.ui.home.HomeScreen
 import com.yuarmy.videoconvert.ui.job.JobScreen
+import com.yuarmy.videoconvert.ui.license.LicenseScreen
 import com.yuarmy.videoconvert.ui.scan.ScanScreen
 import com.yuarmy.videoconvert.ui.settings.SettingsScreen
 
@@ -39,6 +40,7 @@ object Routes {
     const val SCAN = "scan"
     const val CONVERT = "convert?uri={uri}&scan={scan}&reason={reason}"
     const val JOB = "job"
+    const val LICENSES = "licenses"
 
     fun convert(uri: Uri, scan: Boolean = false, reason: String? = null): String {
         return "convert?uri=${Uri.encode(uri.toString())}" +
@@ -103,7 +105,13 @@ fun AppNavHost() {
             )
         }
         composable(Routes.SETTINGS) {
-            SettingsScreen(onBack = { navController.popBackStack() })
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onOpenLicenses = { navController.navigate(Routes.LICENSES) },
+            )
+        }
+        composable(Routes.LICENSES) {
+            LicenseScreen(onBack = { navController.popBackStack() })
         }
     }
 }
