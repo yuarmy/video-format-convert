@@ -18,10 +18,19 @@
  */
 
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+}
+
+// 本地发布签名：keystore.properties 存在时启用，缺失时 release 仍可构建为未签名 APK。
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.isFile) {
+        keystorePropertiesFile.inputStream().use(::load)
+    }
 }
 
 android {
@@ -55,8 +64,22 @@ android {
         }
     }
 
+    signingConfigs {
+        if (keystorePropertiesFile.isFile) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            if (keystorePropertiesFile.isFile) {
+                signingConfig = signingConfigs.getByName("release")
+            }
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

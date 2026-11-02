@@ -1,6 +1,6 @@
 # 视频格式转换 App 设计文档
 
-- 状态：随实现更新（当前覆盖 M1–M4）
+- 状态：随实现更新（当前覆盖 M1–M5）
 - 日期：2026-11-02
 - 适用代码：`app/src/main/java/com/yuarmy/videoconvert`
 
@@ -221,7 +221,9 @@ Media3 运行期失败且用户未取消时，服务自动改用 FFmpeg 重试�
 
 - 仪器测试位于 `app/src/androidTest`：`Media3EngineTest` 覆盖探测、流拷贝、硬件转码、服务与相册写入；`FfmpegEngineTest` 覆盖 native 库加载与编码、命令构建、进度回调、取消、服务级 MKV 输出；`VideoDecodeScannerTest` 覆盖正常文件通过、损坏容器判定与扫描失败源路由；`ConversionQueueTest` 覆盖连续入队、串行完成与历史落盘。
 - 测试素材由 `scripts/` 用桌面 ffmpeg 生成，覆盖各容器/编码组合；Dolby Vision 样本依赖 `tools/dovi_tool`，缺失时脚本跳过。
-- 回归命令：`./gradlew test`、`./gradlew connectedAndroidTest`、`./gradlew lint`。
+- `FormatMatrixTest` 在真机上做格式矩阵回归：全部源容器转 MP4/H.264，以及格式矩阵中每个容器、视频编码与音频编码的抽样组合。素材由 `scripts/run-device-tests.sh` 推到 `/data/local/tmp/vc-matrix`，测试用 `UiAutomation.executeShellCommand` 以 shell 身份复制到应用内部目录，不经过 SAF，也不受分区存储限制。
+- `PerformanceTest` 用 1080p 素材分别跑 Media3 硬件转码与 FFmpeg 软件转码，把耗时与实时倍率写入 logcat，不做绝对速度断言。
+- 回归命令：`./gradlew test`、`./gradlew connectedAndroidTest`、`./gradlew lint`；格式矩阵与性能基线用 `scripts/run-device-tests.sh [matrix|perf|all]`。
 - 真机回归关注：格式矩阵逐项可转换、取消后无残留文件/通知、输出能在相册播放。
 
 ## 12. FFmpeg 接入（M3.4）
@@ -254,7 +256,8 @@ app/src/main/java/com/yuarmy/videoconvert/
                Media3Engine、FfmpegEngine、FfmpegNative、FfmpegCommand、FfmpegProgressParser
   service/     ConversionController（队列）、ConversionService（串行消费）
   ui/          navigation、home、convert、job（队列）、history、scan、settings、license、common、theme
-app/src/androidTest/  Media3EngineTest、FfmpegEngineTest、VideoDecodeScannerTest、ConversionQueueTest
-scripts/       FFmpeg 构建脚本、测试素材生成脚本
+app/src/androidTest/  Media3EngineTest、FfmpegEngineTest、VideoDecodeScannerTest、
+                      ConversionQueueTest、FormatMatrixTest、PerformanceTest
+scripts/       FFmpeg 构建脚本、测试素材生成脚本、真机回归脚本
 ffmpeg/        自编译静态库、JNI 源码与 CMake 构建定义
 ```

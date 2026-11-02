@@ -17,6 +17,9 @@
 - [x] 任务队列：串行转换、查看进度、取消当前、移除待处理、清空队列（M4）
 - [x] 历史记录：成功 / 失败 / 取消结果持久化，支持再次转换、删除与清空（M4）
 - [x] 设置项：输出目录名（M4）
+- [x] 真机格式矩阵回归：全部源容器与目标容器/编码组合自动遍历（M5）
+- [x] 性能基线：1080p 硬件 / 软件转码耗时与实时倍率记录（M5）
+- [x] 发布打包：支持 `keystore.properties` 自动签名（M5）
 
 ## 格式支持
 
@@ -132,6 +135,44 @@ FFMPEG=/path/to/ffmpeg scripts/generate-test-media.sh
 
 Dolby Vision 样本依赖 [dovi_tool](https://github.com/quietvoid/dovi_tool/releases)，放到 `tools/dovi_tool/dovi_tool.exe`；缺失时脚本自动跳过。
 
+## 真机回归与性能
+
+`scripts/run-device-tests.sh` 会把 `test-media/` 推到设备的 `/data/local/tmp/vc-matrix`，测试启动时通过 UiAutomation 以 shell 身份复制到应用内部目录再读取（绕过 Android 15 的 FUSE 限制），然后运行仪器测试；设备上没有 Debug APK 时会自动安装。
+
+```bash
+scripts/run-device-tests.sh          # 格式矩阵 + 性能基线
+scripts/run-device-tests.sh matrix   # 只跑格式矩阵
+scripts/run-device-tests.sh perf     # 只跑性能基线
+FORCE=1 scripts/run-device-tests.sh  # 重新推送素材
+```
+
+- `FormatMatrixTest`：每个源样本转为 MP4/H.264；格式矩阵中每个容器、视频编码、音频编码各至少覆盖一次。
+- `PerformanceTest`：1080p 素材转 720p，分别走 Media3 硬件转码与 FFmpeg 软件转码，结果写入 logcat（TAG `PerformanceTest`）。
+
+参考数据（TALIH-PD3U2，Android 15，arm64-v8a）：
+
+| 路径 | 素材 | 耗时 | 实时倍率 |
+| --- | --- | --- | --- |
+| Media3 硬件转码 1080p→720p | 15s | 2218 ms | 6.77x |
+| FFmpeg 软件转码 1080p→720p | 15s | 5895 ms | 2.55x |
+
+## 发布打包
+
+```bash
+./gradlew assembleRelease
+```
+
+未配置签名时产出 `app/build/outputs/apk/release/app-release-unsigned.apk`。在仓库根目录创建 `keystore.properties`（已 gitignore）后会自动签名：
+
+```properties
+storeFile=release.jks
+storePassword=********
+keyAlias=video-convert
+keyPassword=********
+```
+
+`storeFile` 相对仓库根目录。release 暂不开启 R8（Media3 与 FFmpeg JNI 使用较多反射）；如启用需先补充 keep 规则。
+
 ## 项目结构
 
 ```
@@ -152,7 +193,7 @@ docs/         架构设计文档
   - [x] M3.3 失败文件的格式选择
   - [x] M3.4 FFmpeg 构建与 JNI 封装
 - [x] M4 任务体系：队列、历史、重试、设置项
-- [ ] M5 收尾：真机格式矩阵回归、性能、打包
+- [x] M5 收尾：真机格式矩阵回归、性能、打包
 
 ## 许可证
 

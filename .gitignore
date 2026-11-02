@@ -37,6 +37,7 @@ ffmpeg/toolchain/
 tools/
 
 # 签名与密钥
+keystore.properties
 *.jks
 *.keystore
 *.p12
