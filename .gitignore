@@ -29,6 +29,9 @@ test-media/
 # FFmpeg 构建中间产物（保留源码与脚本）
 ffmpeg/build/
 ffmpeg/prebuilt/
+ffmpeg/downloads/
+ffmpeg/src/
+ffmpeg/toolchain/
 
 # 本地第三方工具（dovi_tool 等）
 tools/

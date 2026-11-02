@@ -65,6 +65,45 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 ./gradlew lint                   # 静态检查
 ```
 
+## FFmpeg 原生库
+
+兜底转码使用自编译的 GPL 版 FFmpeg，含 x264 / x265 / LAME / Opus / Vorbis / VP8-9 / SVT-AV1。
+源码与产物均不纳入仓库（`ffmpeg/downloads`、`ffmpeg/src`、`ffmpeg/build`、`ffmpeg/prebuilt`、`ffmpeg/toolchain` 已忽略）。
+
+```bash
+# 1. 下载并校验源码（SHA-256 已固定），解压到 ffmpeg/src/
+scripts/ffmpeg-download.sh
+
+# 2. 交叉编译（默认 arm64-v8a，多 ABI 用空格分隔）
+scripts/ffmpeg-build.sh
+ABIS="arm64-v8a armeabi-v7a" scripts/ffmpeg-build.sh
+```
+
+常用开关（环境变量）：
+
+| 变量 | 说明 |
+| --- | --- |
+| `ABIS` | 目标 ABI，默认 `arm64-v8a` |
+| `JOBS` | 并行度，默认 CPU 核数 |
+| `WITH_AV1=0` | 跳过 SVT-AV1（不提供 AV1 编码，构建明显更快） |
+| `CLEAN=1` | 清理所选 ABI 的构建目录与产物后重编 |
+| `FORCE=1` | 忽略已存在的静态库，全部重编 |
+| `DEPS_ONLY=1` / `FFMPEG_ONLY=1` | 只编第三方依赖 / 只编 FFmpeg |
+| `NO_DOWNLOAD=1` | 源码缺失时不自动下载 |
+| `NDK` / `CMAKE` / `NINJA` / `MAKE` | 手动指定工具路径 |
+| `HOSTCC` | 主机 C 编译器，显式指定时跳过自动探测 |
+
+产物位于 `ffmpeg/prebuilt/<abi>/`：`include/` 头文件、`lib/*.a` 静态库、`BUILD_INFO.txt`
+（记录版本、configure 参数与链接要求）。JNI 层把这些静态库链接成一个 `libffmpeg.so`，链接时必须带
+`-Wl,-z,max-page-size=16384` 以满足 Android 15+ 的 16KB 页要求；x265 依赖 `c++_static` 运行时。
+
+脚本自动定位 NDK r28+、SDK 自带 CMake/Ninja 与 NDK 自带 make；主机没有 `pkg-config` 时使用
+`scripts/lib/pkg-config-shim`。x86 / x86_64 ABI 额外需要 `nasm`。
+
+FFmpeg 的 tablegen 代码生成器需要在本机运行，因此即使交叉编译也要有原生 C 编译器（gcc/cc/clang）。
+Windows 没装 MSVC/MSYS2 时，可下载便携版 [w64devkit](https://github.com/skeeto/w64devkit/releases)，
+解压到 `ffmpeg/toolchain/w64devkit/`，脚本会自动发现；也可用 `HOSTCC=/path/to/gcc` 指定。
+
 ## 测试素材
 
 ```bash

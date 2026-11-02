@@ -1,0 +1,175 @@
+#!/usr/bin/env bash
+# Copyright (C) 2026 yuarmy
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# 最小 pkg-config 实现，仅在主机没有 pkg-config 时由 FFmpeg 的 configure 使用。
+# 支持 FFmpeg 实际用到的选项：--exists / --cflags / --cflags-only-I / --libs /
+# --variable= / --modversion / --static。只解析 PKG_CONFIG_PATH 中我们自建的 .pc。
+
+set -u
+
+print_errors=0
+static=0
+mode=""
+var_name=""
+packages=()
+
+for arg in "$@"; do
+    case "$arg" in
+        --version)        printf '0.29.2\n'; exit 0 ;;
+        --exists)         mode="exists" ;;
+        --cflags)         mode="cflags" ;;
+        --cflags-only-I)  mode="cflags-i" ;;
+        --libs)           mode="libs" ;;
+        --libs-only-l)    mode="libs-l" ;;
+        --modversion)     mode="modversion" ;;
+        --variable=*)     mode="variable"; var_name="${arg#--variable=}" ;;
+        --print-errors)   print_errors=1 ;;
+        --silence-errors) print_errors=0 ;;
+        --static)         static=1 ;;
+        --)               ;;
+        --*)              ;;
+        *)                packages+=("$arg") ;;
+    esac
+done
+
+[ "${#packages[@]}" -gt 0 ] || exit 1
+spec="${packages[*]}"
+name="${spec%% *}"
+constraint=""
+case "$spec" in
+    *">="*) constraint="${spec##*>=}" ;;
+    *">"*)  constraint="${spec##*>}" ;;
+    *"="*)  constraint="${spec##*=}" ;;
+esac
+constraint="${constraint// /}"
+
+fail() {
+    if [ "$print_errors" = 1 ]; then
+        printf 'Package %s was not found in the pkg-config search path.\n' "$name" >&2
+    fi
+    exit 1
+}
+
+find_pc() {
+    local pkg="$1" dir
+    local dirs="${PKG_CONFIG_PATH:-}:${PKG_CONFIG_LIBDIR:-}"
+    local old_ifs="$IFS"
+    IFS=':'
+    for dir in $dirs; do
+        IFS="$old_ifs"
+        [ -n "$dir" ] || continue
+        if [ -f "$dir/$pkg.pc" ]; then
+            printf '%s\n' "$dir/$pkg.pc"
+            return 0
+        fi
+    done
+    IFS="$old_ifs"
+    return 1
+}
+
+pc_value() {
+    local file="$1" field="$2"
+    awk -v f="$field" 'index($0, f ":") == 1 { sub("^[^:]*:[ \t]*", ""); print; exit }' "$file"
+}
+
+pc_var() {
+    local file="$1" key="$2" line
+    line=$(grep -E "^${key}=" "$file" | head -1) || return 1
+    printf '%s\n' "${line#*=}"
+}
+
+expand() {
+    local file="$1" text="$2" depth=0 whole key value
+    while [[ "$text" =~ \$\{([A-Za-z_][A-Za-z0-9_]*)\} ]]; do
+        whole="${BASH_REMATCH[0]}"
+        key="${BASH_REMATCH[1]}"
+        value=$(pc_var "$file" "$key") || value=""
+        text="${text//"$whole"/"$value"}"
+        depth=$((depth + 1))
+        [ "$depth" -lt 16 ] || break
+    done
+    printf '%s\n' "$text"
+}
+
+version_ge() {
+    [ "$(printf '%s\n%s\n' "$2" "$1" | sort -V | head -n 1)" = "$2" ]
+}
+
+pc_file=$(find_pc "$name") || fail
+[ -f "$pc_file" ] || fail
+
+version=$(expand "$pc_file" "$(pc_value "$pc_file" Version)")
+if [ -n "$constraint" ] && [ -n "$version" ]; then
+    version_ge "$version" "$constraint" || fail
+fi
+
+case "$mode" in
+    exists)   exit 0 ;;
+    modversion)
+        printf '%s\n' "$version"
+        exit 0
+        ;;
+    variable)
+        value=$(pc_var "$pc_file" "$var_name") || value=""
+        printf '%s\n' "$(expand "$pc_file" "$value")"
+        exit 0
+        ;;
+esac
+
+declare -A seen=()
+
+collect() {
+    local pkg="$1" kind="$2" file own deps dep
+    [ -z "${seen[$pkg]:-}" ] || return 0
+    seen[$pkg]=1
+    file=$(find_pc "$pkg") || return 0
+
+    if [ "$kind" = "cflags" ]; then
+        own=$(pc_value "$file" Cflags)
+        [ "$static" = 1 ] && own="$own $(pc_value "$file" Cflags.private)"
+    else
+        own=$(pc_value "$file" Libs)
+        [ "$static" = 1 ] && own="$own $(pc_value "$file" Libs.private)"
+    fi
+    expand "$file" "$own"
+    printf '\n'
+
+    if [ "$static" = 1 ]; then
+        deps="$(pc_value "$file" Requires) $(pc_value "$file" Requires.private)"
+    else
+        deps="$(pc_value "$file" Requires)"
+    fi
+    for dep in $deps; do
+        case "$dep" in
+            *">"*|*"<"*|*"="*|[0-9]*) continue ;;
+        esac
+        collect "$dep" "$kind"
+    done
+}
+
+raw=$(collect "$name" "$( [ "$mode" = "libs" ] || [ "$mode" = "libs-l" ] && printf libs || printf cflags )")
+flags=""
+for token in $raw; do
+    case "$mode" in
+        cflags-i)  case "$token" in -I*) flags="$flags $token" ;; esac ;;
+        libs-l)    case "$token" in -l*) flags="$flags $token" ;; esac ;;
+        *)         flags="$flags $token" ;;
+    esac
+done
+
+printf '%s\n' "${flags# }"
