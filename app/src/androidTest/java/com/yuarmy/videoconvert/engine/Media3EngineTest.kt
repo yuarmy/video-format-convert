@@ -41,6 +41,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assume
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -204,6 +205,7 @@ class Media3EngineTest {
 
     @Test
     fun route_shouldUseFfmpegForMkvContainers() {
+        Assume.assumeTrue(FfmpegNative.available)
         val mkv = FormatCatalog.containers.first { it.id == "mkv" }
         val spec = ConversionSpec(
             source = sourceInfo,

@@ -36,6 +36,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assume
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
@@ -55,7 +56,8 @@ class FfmpegEngineTest {
 
     @Before
     fun setUp() {
-        assertTrue(
+        // 原生库只打包 arm64-v8a，其他 ABI 上跳过而不是报失败。
+        Assume.assumeTrue(
             "libffmpeg_jni.so 加载失败：${FfmpegNative.loadFailureMessage}",
             FfmpegNative.available,
         )

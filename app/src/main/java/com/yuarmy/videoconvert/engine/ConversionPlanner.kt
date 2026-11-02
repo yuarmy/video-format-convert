@@ -44,7 +44,9 @@ object ConversionPlanner {
 
     fun plan(spec: ConversionSpec): ConversionPlan {
         val scaleHeight = spec.resolution.maxHeight?.takeIf { maxHeight ->
-            (spec.source.orientedHeight ?: 0) > maxHeight
+            val sourceHeight = spec.source.orientedHeight
+            // 源尺寸未知时无法判断是否需要缩放，仍按用户选择执行。
+            sourceHeight == null || sourceHeight <= 0 || sourceHeight > maxHeight
         }
         val sourceVideoMime = spec.source.videoMime
 

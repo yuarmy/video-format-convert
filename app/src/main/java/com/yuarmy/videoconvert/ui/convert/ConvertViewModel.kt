@@ -39,6 +39,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -71,6 +72,8 @@ class ConvertViewModel(
 
     val route: StateFlow<EngineRoute?> = uiState
         .map { state -> state.toSpec(scanMode)?.let(EngineRouter::route) }
+        // 首次路由会触发 System.loadLibrary，不能阻塞主线程。
+        .flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
     fun currentSpec(): ConversionSpec? = _uiState.value.toSpec(scanMode)

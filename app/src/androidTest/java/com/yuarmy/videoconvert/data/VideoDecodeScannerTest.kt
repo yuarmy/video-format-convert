@@ -32,7 +32,9 @@ import com.yuarmy.videoconvert.domain.model.VideoCodecs
 import com.yuarmy.videoconvert.domain.model.VideoInfo
 import com.yuarmy.videoconvert.engine.EngineRoute
 import com.yuarmy.videoconvert.engine.EngineRouter
+import com.yuarmy.videoconvert.engine.FfmpegNative
 import org.junit.After
+import org.junit.Assume
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -101,6 +103,7 @@ class VideoDecodeScannerTest {
 
     @Test
     fun route_shouldSendUndecodableSourceToFfmpeg() {
+        Assume.assumeTrue(FfmpegNative.available)
         val remuxSpec = spec(
             resolution = FormatCatalog.resolutions.first(),
             quality = Quality.AUTO,

@@ -72,10 +72,16 @@ class FfmpegEngine(private val context: Context) : ConversionEngine {
                 outputPath = output.absolutePath,
                 plan = plan,
             )
+            // 打开 SAF 文件与整理参数可能耗时，取消可能发生在这段时间里。
+            if (cancelled) {
+                return@withContext ConversionResult.Cancelled
+            }
             val exitCode = FfmpegNative.run(args.toTypedArray(), parser)
 
             when {
                 cancelled -> ConversionResult.Cancelled
+
+                exitCode == -2 -> ConversionResult.Failure("上一段 FFmpeg 转换尚未退出，请稍后重试")
 
                 exitCode == 0 && output.length() > 0 -> ConversionResult.Success(output)
 

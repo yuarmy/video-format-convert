@@ -120,12 +120,23 @@ Java_com_yuarmy_videoconvert_engine_FfmpegNative_run(
     (void)clazz;
     bool expected = false;
     int argc = (*env)->GetArrayLength(env, jargs);
-    char **argv = calloc((size_t)argc + 1, sizeof(char *));
+    char **argv;
     jobject callback_ref = NULL;
     jint result = -1;
 
     if (!atomic_compare_exchange_strong(&g_running, &expected, true))
         return -2;
+
+    /* 先复位信号标志再整理参数：取消若落在参数整理期间，标志会保持置位，
+       ffmpeg_main 启动后立即退出，而不是白跑完整段转码。 */
+    received_sigterm = 0;
+    received_nb_signals = 0;
+    nb_input_files = 0;
+    nb_output_files = 0;
+    nb_filtergraphs = 0;
+    nb_decoders = 0;
+
+    argv = calloc((size_t)argc + 1, sizeof(char *));
     if (!argv) {
         result = -4;
         goto done;
@@ -162,13 +173,6 @@ Java_com_yuarmy_videoconvert_engine_FfmpegNative_run(
         }
     }
     atomic_store_explicit(&g_callback, callback_ref, memory_order_release);
-
-    received_sigterm = 0;
-    received_nb_signals = 0;
-    nb_input_files = 0;
-    nb_output_files = 0;
-    nb_filtergraphs = 0;
-    nb_decoders = 0;
 
     av_log_set_level(AV_LOG_INFO);
     av_log_set_callback(jni_log_callback);

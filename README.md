@@ -84,7 +84,6 @@ ABIS="arm64-v8a armeabi-v7a" scripts/ffmpeg-build.sh
 | --- | --- |
 | `ABIS` | 目标 ABI，默认 `arm64-v8a` |
 | `JOBS` | 并行度，默认 CPU 核数 |
-| `WITH_AV1=0` | 跳过 SVT-AV1（不提供 AV1 编码，构建明显更快） |
 | `CLEAN=1` | 清理所选 ABI 的构建目录与产物后重编 |
 | `FORCE=1` | 忽略已存在的静态库，全部重编 |
 | `DEPS_ONLY=1` / `FFMPEG_ONLY=1` | 只编第三方依赖 / 只编 FFmpeg |

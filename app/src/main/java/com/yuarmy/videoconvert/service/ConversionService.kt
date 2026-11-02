@@ -108,6 +108,8 @@ class ConversionService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        // 原生 FFmpeg 不响应协程取消，必须先通知它退出，否则会继续占满 CPU。
+        engine?.cancel()
         scope.cancel()
         releaseWakeLock()
         super.onDestroy()
@@ -116,7 +118,9 @@ class ConversionService : Service() {
     private suspend fun runConversion(spec: ConversionSpec) {
         var output: File? = null
         try {
-            val result = when (val route = EngineRouter.route(spec)) {
+            // 路由可能触发 FFmpeg 原生库首次加载，不能放在服务主线程上。
+            val route = withContext(Dispatchers.IO) { EngineRouter.route(spec) }
+            val result = when (route) {
                 is EngineRoute.Unsupported -> {
                     ConversionController.publish(JobState.Failed(route.reason))
                     return
@@ -126,9 +130,10 @@ class ConversionService : Service() {
                     val primary = execute(Media3Engine(this, route.remux), spec, defaultNote = null)
                     // Media3 运行期才失败的场景（编码器初始化失败、源容器不受支持）
                     // 统一回退到 FFmpeg，避免让用户再点一次。
+                    val canFallback = withContext(Dispatchers.IO) { FfmpegNative.available }
                     if (primary is ConversionResult.Failure &&
                         !cancelRequested &&
-                        FfmpegNative.available
+                        canFallback
                     ) {
                         execute(
                             FfmpegEngine(this),

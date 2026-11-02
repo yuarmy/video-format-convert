@@ -210,7 +210,10 @@ class Media3Engine(
     private fun buildEditedMediaItem(spec: ConversionSpec): EditedMediaItem {
         val builder = EditedMediaItem.Builder(MediaItem.fromUri(spec.source.uri))
         val maxHeight = spec.resolution.maxHeight
-        if (!remux && maxHeight != null && (spec.source.orientedHeight ?: 0) > maxHeight) {
+        val sourceHeight = spec.source.orientedHeight
+        if (!remux && maxHeight != null &&
+            (sourceHeight == null || sourceHeight <= 0 || sourceHeight > maxHeight)
+        ) {
             builder.setEffects(
                 Effects(emptyList(), listOf(Presentation.createForHeight(maxHeight))),
             )

@@ -20,7 +20,6 @@
 #
 # 用法:
 #   scripts/ffmpeg-download.sh
-#   WITH_AV1=0 scripts/ffmpeg-download.sh     # 跳过 SVT-AV1（AV1 编码）
 #   FORCE=1 scripts/ffmpeg-download.sh        # 重新下载并解压
 #
 # 归档文件保存在 ffmpeg/downloads/，解压到 ffmpeg/src/<组件>/，两者均不纳入仓库。
@@ -30,7 +29,6 @@ set -euo pipefail
 # shellcheck source=lib/ffmpeg-common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/lib/ffmpeg-common.sh"
 
-WITH_AV1="${WITH_AV1:-1}"
 FORCE="${FORCE:-0}"
 
 fetch() {
@@ -106,12 +104,8 @@ step "libvpx $VPX_VERSION"
 fetch "libvpx" "$VPX_URL" "$VPX_SHA256" "libvpx-$VPX_VERSION.tar.gz"
 extract "vpx" "libvpx-$VPX_VERSION.tar.gz"
 
-if [ "$WITH_AV1" = "1" ]; then
-    step "SVT-AV1 $SVT_AV1_VERSION"
-    fetch "SVT-AV1" "$SVT_AV1_URL" "$SVT_AV1_SHA256" "SVT-AV1-$SVT_AV1_VERSION.tar.gz"
-    extract "svt-av1" "SVT-AV1-$SVT_AV1_VERSION.tar.gz"
-else
-    log "已跳过 SVT-AV1（WITH_AV1=0）"
-fi
+step "SVT-AV1 $SVT_AV1_VERSION"
+fetch "SVT-AV1" "$SVT_AV1_URL" "$SVT_AV1_SHA256" "SVT-AV1-$SVT_AV1_VERSION.tar.gz"
+extract "svt-av1" "SVT-AV1-$SVT_AV1_VERSION.tar.gz"
 
 printf '\n完成。源码目录: %s\n' "$SRC_DIR"

@@ -23,7 +23,6 @@
 #   ABIS="arm64-v8a armeabi-v7a" scripts/ffmpeg-build.sh
 #   CLEAN=1 scripts/ffmpeg-build.sh          # 清掉所选 ABI 的构建目录与产物
 #   FORCE=1 scripts/ffmpeg-build.sh          # 忽略已存在的库，全部重编
-#   WITH_AV1=0 scripts/ffmpeg-build.sh       # 不编 SVT-AV1（无 AV1 编码）
 #   DEPS_ONLY=1 scripts/ffmpeg-build.sh      # 只编依赖，不编 FFmpeg
 #   FFMPEG_ONLY=1 scripts/ffmpeg-build.sh    # 只编 FFmpeg
 #   NO_DOWNLOAD=1 scripts/ffmpeg-build.sh    # 源码缺失时不自动下载
@@ -34,7 +33,7 @@
 #
 # 产物:
 #   ffmpeg/prebuilt/<abi>/include/   头文件
-#   ffmpeg/prebuilt/<abi>/lib/*.a    静态库（最后由 JNI 层链接成 libffmpeg.so）
+#   ffmpeg/prebuilt/<abi>/lib/*.a    静态库（最后由 JNI 层链接成 libffmpeg_jni.so）
 #   ffmpeg/prebuilt/<abi>/BUILD_INFO.txt
 
 set -euo pipefail
@@ -46,7 +45,6 @@ ABIS="${ABIS:-$DEFAULT_ABIS}"
 JOBS="${JOBS:-$(jobs_count)}"
 FORCE="${FORCE:-0}"
 CLEAN="${CLEAN:-0}"
-WITH_AV1="${WITH_AV1:-1}"
 DEPS_ONLY="${DEPS_ONLY:-0}"
 FFMPEG_ONLY="${FFMPEG_ONLY:-0}"
 NO_DOWNLOAD="${NO_DOWNLOAD:-0}"
@@ -93,15 +91,13 @@ printf '并行  : %s\n' "$JOBS"
 
 if [ "$NO_DOWNLOAD" != "1" ] && [ ! -d "$SRC_DIR/ffmpeg" ]; then
     step "源码缺失，先执行下载"
-    WITH_AV1="$WITH_AV1" "$ROOT/scripts/ffmpeg-download.sh"
+    "$ROOT/scripts/ffmpeg-download.sh"
 fi
 
 for component in ffmpeg x264 x265 lame opus ogg vorbis vpx; do
     [ -d "$SRC_DIR/$component" ] || die "缺少源码 $SRC_DIR/$component，先运行 scripts/ffmpeg-download.sh"
 done
-if [ "$WITH_AV1" = "1" ]; then
-    [ -d "$SRC_DIR/svt-av1" ] || die "缺少源码 $SRC_DIR/svt-av1，先运行 scripts/ffmpeg-download.sh"
-fi
+[ -d "$SRC_DIR/svt-av1" ] || die "缺少源码 $SRC_DIR/svt-av1，先运行 scripts/ffmpeg-download.sh"
 
 have_lib() { [ -f "$PREFIX/lib/$1" ]; }
 
@@ -323,9 +319,7 @@ build_ffmpeg() {
     # FFMPEG_ONLY=1 时依赖不会重新构建，.pc 修补也不会执行，必须在这里补上。
     patch_vorbis_pc
     patch_x265_pc
-    if [ "$WITH_AV1" = "1" ]; then
-        patch_svt_av1_pc
-    fi
+    patch_svt_av1_pc
 
     local host_cc
     host_cc="$(find_host_cc)"
@@ -357,10 +351,8 @@ build_ffmpeg() {
         --enable-libopus
         --enable-libvorbis
         --enable-libvpx
+        --enable-libsvtav1
     )
-    if [ "$WITH_AV1" = "1" ]; then
-        lib_args+=(--enable-libsvtav1)
-    fi
 
     run_logged "$LOG_DIR/ffmpeg-configure.log" \
         build_in "$bld" "$(host_path "$SRC_DIR/ffmpeg")/configure" \
@@ -440,11 +432,7 @@ write_build_info() {
         echo "ogg=$OGG_VERSION"
         echo "vorbis=$VORBIS_VERSION"
         echo "vpx=$VPX_VERSION"
-        if [ "$WITH_AV1" = "1" ]; then
-            echo "svt-av1=$SVT_AV1_VERSION"
-        else
-            echo "svt-av1=disabled"
-        fi
+        echo "svt-av1=$SVT_AV1_VERSION"
         echo "link_flags=-Wl,-z,max-page-size=16384"
         echo "system_libs=-lm -ldl -llog -landroid"
         echo "cxx_runtime=c++_static"
@@ -473,9 +461,7 @@ for abi in $ABIS; do
         build_x264
         build_x265
         build_vpx
-        if [ "$WITH_AV1" = "1" ]; then
-            build_svt_av1
-        fi
+        build_svt_av1
     fi
 
     if [ "$DEPS_ONLY" != "1" ]; then

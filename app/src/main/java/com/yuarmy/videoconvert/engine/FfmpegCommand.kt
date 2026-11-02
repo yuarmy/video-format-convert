@@ -62,8 +62,8 @@ object FfmpegCommand {
             args += listOf("-c:v", "copy")
             if (plan.dolbyVisionCopy) {
                 args += listOf("-bsf:v", "dovi_rpu", "-strict", "unofficial")
-                args += listOf("-tag:v", "hvc1")
             }
+            appendContainerVideoTags(args, spec)
             return
         }
 
@@ -116,6 +116,11 @@ object FfmpegCommand {
             }
         }
 
+        appendContainerVideoTags(args, spec)
+    }
+
+    private fun appendContainerVideoTags(args: MutableList<String>, spec: ConversionSpec) {
+        // mov 封装器默认把 HEVC 标成 hev1，QuickTime/iOS 不认；流拷贝时同样需要显式指定。
         if (spec.videoCodec.id == VideoCodecs.H265.id &&
             (spec.container.id == "mp4" || spec.container.id == "mov")
         ) {
@@ -154,8 +159,8 @@ object FfmpegCommand {
         }
 
     private fun mpegBitrate(spec: ConversionSpec): Int {
-        val sourceHeight = spec.source.orientedHeight ?: return 1_500_000
-        val sourceWidth = spec.source.orientedWidth ?: return 1_500_000
+        val sourceHeight = spec.source.orientedHeight?.takeIf { it > 0 } ?: return 1_500_000
+        val sourceWidth = spec.source.orientedWidth?.takeIf { it > 0 } ?: return 1_500_000
         val targetHeight = minOf(sourceHeight, spec.resolution.maxHeight ?: sourceHeight)
         val targetWidth = (sourceWidth.toDouble() * targetHeight / sourceHeight).roundToInt()
         val frameRate = spec.source.frameRate ?: 30f

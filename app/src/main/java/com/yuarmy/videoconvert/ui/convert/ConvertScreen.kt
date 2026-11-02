@@ -185,7 +185,7 @@ fun ConvertScreen(
                             .padding(16.dp),
                         verticalArrangement = Arrangement.spacedBy(16.dp),
                     ) {
-                        state.scanWarning?.let { ScanWarningCard(it) }
+                        state.scanWarning?.let { ScanWarningCard(it, route) }
                         SourceCard(info)
                         FormatCard(
                             container = container,
@@ -226,6 +226,7 @@ private fun RouteHint(route: EngineRoute?) {
         }
 
         is EngineRoute.Ffmpeg -> when {
+            route.note != null && route.remux -> "${route.note}；直接流拷贝，无画质损失" to false
             route.remux -> "将使用 FFmpeg 直接流拷贝，无画质损失" to false
             route.note != null -> route.note to false
             else -> "将使用 FFmpeg 软件编码，速度较慢" to false
@@ -248,7 +249,7 @@ private fun RouteHint(route: EngineRoute?) {
 }
 
 @Composable
-private fun ScanWarningCard(reason: String) {
+private fun ScanWarningCard(reason: String, route: EngineRoute?) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(
@@ -271,7 +272,11 @@ private fun ScanWarningCard(reason: String) {
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
             Text(
-                text = "将由 FFmpeg 软件解码并转码，速度较慢、耗电与发热更高。",
+                text = if (route is EngineRoute.Ffmpeg && route.remux) {
+                    "容器与编码兼容，将改用 FFmpeg 直接流拷贝，无画质损失。"
+                } else {
+                    "将由 FFmpeg 软件解码并转码，速度较慢、耗电与发热更高。"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onErrorContainer,
             )
