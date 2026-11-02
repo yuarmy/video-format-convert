@@ -37,10 +37,6 @@ env:
   ANDROID_NDK: ndk;30.0.16248370
   ANDROID_CMAKE: cmake;3.22.1
 
-  # FFmpeg 源码与静态库不入库，靠这里缓存。脚本或版本变了才重编。
-  # 改了 ffmpeg-common.sh 里的版本号会自动失效；手动强制重编请改版本后缀。
-  FFMPEG_CACHE_KEY: ffmpeg-arm64-v8a-ndk30-v1-${{ hashFiles('scripts/ffmpeg-build.sh', 'scripts/ffmpeg-download.sh', 'scripts/lib/**') }}
-
 jobs:
   checks:
     name: Lint 与单元测试
@@ -103,6 +99,8 @@ jobs:
       - name: 修正脚本权限
         run: chmod +x gradlew scripts/*.sh
 
+      # FFmpeg 源码与静态库不入库，靠这里缓存。脚本或版本变了才重编。
+      # 改了 ffmpeg-common.sh 里的版本号会自动失效；手动强制重编请改版本后缀。
       - name: 恢复 FFmpeg 源码与预编译库
         id: ffmpeg-cache
         uses: actions/cache/restore@v4
@@ -112,7 +110,7 @@ jobs:
             ffmpeg/downloads
             ffmpeg/src
             ffmpeg/prebuilt
-          key: ${{ env.FFMPEG_CACHE_KEY }}
+          key: ffmpeg-arm64-v8a-ndk30-v1-${{ hashFiles('scripts/ffmpeg-build.sh', 'scripts/ffmpeg-download.sh', 'scripts/lib/**') }}
 
       - name: 编译 FFmpeg
         if: steps.ffmpeg-cache.outputs.cache-hit != 'true'
