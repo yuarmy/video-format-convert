@@ -64,6 +64,17 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 ./gradlew lint                   # 静态检查
 ```
 
+## 持续集成
+
+`.github/workflows/ci.yml` 在 push / PR 时运行两个任务：
+
+- **Lint 与单元测试**：Kotlin 编译、Lint、单元测试，不需要 FFmpeg 原生库，通常几分钟内完成。
+- **构建 Debug APK**：先跑上面的检查，再交叉编译 FFmpeg。`ffmpeg/downloads`、`ffmpeg/src`、`ffmpeg/prebuilt`
+  按 `scripts/` 下构建脚本的哈希缓存；首次约 30–60 分钟，缓存命中后几分钟即可完成，脚本或版本号变更会自动重编。
+  产物以 `app-debug` artifact 形式保留 14 天。
+
+仪器测试（`connectedAndroidTest`）需要真机或模拟器，暂未纳入 CI。
+
 ## FFmpeg 原生库
 
 兜底转码使用自编译的 GPL 版 FFmpeg，含 x264 / x265 / LAME / Opus / Vorbis / VP8-9 / SVT-AV1。
