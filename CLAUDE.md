@@ -9,7 +9,7 @@
 - 技术栈：Kotlin + Jetpack Compose（Material 3），单 Activity
 - minSdk 26，targetSdk 36，compileSdk 37（Compose 1.12 / Lifecycle 2.11 要求）
 - 构建：Gradle 9.6.0 + AGP 9.5.0；AGP 9 内置 Kotlin，不要再应用 `kotlin-android` 插件
-- 授权：开源。可以使用 GPL 版 FFmpeg（含 x264/x265/LAME）
+- 授权：GPL-3.0-or-later（`LICENSE` 为完整条款，源文件带 SPDX 头）。可以使用 GPL 版 FFmpeg（含 x264/x265/LAME）
 
 ## 转换引擎架构（最重要）
 
