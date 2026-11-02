@@ -43,20 +43,30 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.yuarmy.videoconvert.service.ConversionController
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(
     onVideoPicked: (Uri) -> Unit,
     onScan: () -> Unit,
+    onOpenQueue: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
     val context = LocalContext.current
+    val queue by ConversionController.state.collectAsStateWithLifecycle()
+
+    LaunchedEffect(Unit) {
+        ConversionController.resume(context)
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             runCatching {
@@ -119,6 +129,23 @@ fun HomeScreen(
                 shape = RoundedCornerShape(16.dp),
             ) {
                 Text("扫描解码兼容性", style = MaterialTheme.typography.titleMedium)
+            }
+            Spacer(Modifier.height(12.dp))
+            OutlinedButton(
+                onClick = onOpenQueue,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Text(
+                    text = when {
+                        queue.current != null -> "转换中 · 查看队列 (${queue.totalCount})"
+                        queue.pending.isNotEmpty() -> "任务队列 (${queue.pending.size})"
+                        else -> "任务队列"
+                    },
+                    style = MaterialTheme.typography.titleMedium,
+                )
             }
             Spacer(Modifier.height(16.dp))
             Text(

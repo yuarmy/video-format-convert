@@ -1,7 +1,7 @@
 # 视频格式转换 App 设计文档
 
-- 状态：随实现更新（当前覆盖 M1–M3.4）
-- 日期：2026-10-30
+- 状态：随实现更新（当前覆盖 M1–M4）
+- 日期：2026-11-02
 - 适用代码：`app/src/main/java/com/yuarmy/videoconvert`
 
 ## 1. 目标与非目标
@@ -25,18 +25,19 @@
 ## 3. 架构总览
 
 ```
-┌──────────────────────────── ui ────────────────────────────┐
-│ HomeScreen  ConvertScreen  JobScreen  ScanScreen  Settings │
-│        │         │            │           │                │
-│        └── ViewModel（StateFlow，UI 只读状态、发事件）      │
-└───────────────┬──────────────────────────┬─────────────────┘
+┌─────────────────────────────── ui ────────────────────────────────┐
+│ HomeScreen  ConvertScreen  QueueScreen  HistoryScreen             │
+│ ScanScreen  SettingsScreen  LicenseScreen                         │
+│        │         │            │           │                       │
+│        └── ViewModel（StateFlow，UI 只读状态、发事件）             │
+└───────────────┬──────────────────────────┬────────────────────────┘
                 │ submit(ConversionSpec)   │ scan
                 ▼                          ▼
-┌──────── service ─────────┐   ┌──────── data ────────┐
-│ ConversionController     │   │ VideoDecodeScanner   │
-│  （进程级 JobState）     │   │ MediaProbe           │
-│ ConversionService        │   │ MediaStoreSaver      │
-│  （前台服务 + 唤醒锁）   │   └──────────────────────┘
+┌──────── service ─────────┐   ┌──────── data ──────────────────────┐
+│ ConversionController     │   │ VideoDecodeScanner  MediaProbe     │
+│  （进程级队列 + StateFlow）│   │ MediaStoreSaver     HistoryStore   │
+│ ConversionService        │   │ SettingsStore                     │
+│  （前台服务 + 唤醒锁）   │   └────────────────────────────────────┘
 └───────────┬──────────────┘
             │ EngineRouter.route(spec)
             ▼
@@ -55,10 +56,10 @@
 
 | 模块 | 职责 |
 | --- | --- |
-| `ui/` | Compose 页面、导航、各页面 ViewModel；只做状态渲染与用户事件转发 |
+| `ui/` | Compose 页面、导航与状态订阅（配置页用 ViewModel，队列/历史页直接订阅 StateFlow） |
 | `service/` | 前台服务承载长任务；`ConversionController` 是 UI 与服务之间的进程级状态桥 |
 | `engine/` | `ConversionEngine` 统一接口、Media3 实现、路由与能力探测 |
-| `data/` | 元数据探测、目录扫描、MediaStore 写入 |
+| `data/` | 元数据探测、目录扫描、MediaStore 写入、历史与设置持久化 |
 | `domain/model/` | 与平台无关的模型与格式矩阵 |
 
 单模块起步；FFmpeg JNI 明显膨胀后再拆 `:ffmpeg`。
@@ -97,11 +98,11 @@ data class ConversionSpec(
 1. 用户选择视频（SAF `OpenDocument`）→ 导航到配置页。
 2. `ConvertViewModel` 用 `MediaProbe.probe` 读取元数据，默认选中 MP4 + H.264 + AAC + 原始分辨率 + 自动质量。
 3. 每次配置变化，`EngineRouter.route(spec)` 重新计算路由；UI 展示提示（流拷贝 / 不可用原因）。
-4. 点击开始 → `ConversionController.submit` 保存 `pendingSpec` 并启动 `ConversionService`（`startForegroundService`）。
-5. 服务 `startForeground` + 获取 `PARTIAL_WAKE_LOCK`，取出 spec，调用引擎。
+4. 点击开始 → `ConversionController.submit` 将任务入队并启动 `ConversionService`（`startForegroundService`）。
+5. 服务 `startForeground` + 获取 `PARTIAL_WAKE_LOCK`，循环 `takeNext` 串行取出任务，调用引擎。
 6. 引擎把结果写到 `cacheDir/conversions/<timestamp>.<ext>`。
-7. 成功后 `MediaStoreSaver.save` 写入相册，发布 `Success(outputUri, displayName)`。
-8. `finally` 删除临时文件、释放唤醒锁、`stopForeground` + `stopSelf`。
+7. 成功后 `MediaStoreSaver.save` 写入相册，发布 `Success(outputUri, displayName)`；终态同时写入历史。
+8. 队列耗尽后 `finally` 删除临时文件、释放唤醒锁、`stopForeground` + `stopSelf`。
 
 ### 5.2 路由决策
 
@@ -167,19 +168,44 @@ Media3 运行期失败且用户未取消时，服务自动改用 FFmpeg 重试�
 ## 7. 输出与存储
 
 - 引擎只写 App 私有缓存，不直接写外部存储。
-- `MediaStoreSaver` 在 Android 10+ 使用分区存储：先 `insert` 且 `IS_PENDING=1`，流式拷贝后置 0；任何异常都删除占位记录。目标目录 `Movies/视频转换`。
-- Android 8–9 走旧路径：写入 `Movies/视频转换` 后用 `MediaScannerConnection` 通知相册，重名自动追加 `(1)`、`(2)`。
+- `MediaStoreSaver` 在 Android 10+ 使用分区存储：先 `insert` 且 `IS_PENDING=1`，流式拷贝后置 0；任何异常都删除占位记录。目标目录为 `Movies/<设置中的输出目录名>`，默认 `视频转换`。
+- Android 8–9 走旧路径：写入同一目录后用 `MediaScannerConnection` 通知相册，重名自动追加 `(1)`、`(2)`。
 - 输出文件名：`<源文件名>_converted.<容器扩展名>`，非法字符替换、截断到 80 字符。
 - 转换结束无论成功失败都删除缓存临时文件。
 
 ## 8. 生命周期、前台服务与取消
 
 - 长任务只在 `android:foregroundServiceType="mediaProcessing"` 的前台服务中执行（`ConversionService`），通知带进度与“取消”按钮。
-- 服务启动时获取 1 小时上限的 `PARTIAL_WAKE_LOCK`，`finally` 释放。
-- 取消路径：通知按钮 / 页面按钮 → `ACTION_CANCEL` → 取消协程 + `engine.cancel()`；服务的 `finally` 在 `NonCancellable` 中清理通知、唤醒锁与临时文件。
-- `ConversionController` 是进程内单例（`StateFlow<JobState>` + `pendingSpec`），进程被杀后任务不恢复；这是 M4 任务队列要替换的部分。
+- 服务启动时获取 4 小时上限的 `PARTIAL_WAKE_LOCK`，队列耗尽或服务销毁时释放。
+- 取消路径：通知按钮 / 队列页按钮 → `ACTION_CANCEL` → 取消当前任务的子协程 + `engine.cancel()`；队列循环继续处理后续任务。
+- 队列正常耗尽时服务自行退出；异常销毁且未正常结束时，`onServiceStopped` 把当前任务记为 `Cancelled` 并写入历史，避免任务永远停留在“进行中”。
+- `ConversionController` 是进程内单例（`StateFlow<QueueUiState>` + 内存队列），进程被杀后未完成任务不恢复；历史通过 `HistoryStore` 落盘。
 
-## 9. 错误处理与回退
+## 9. 任务队列、历史与设置（M4）
+
+### 9.1 队列
+
+- `ConversionController` 持有 `ArrayDeque<QueueJob>`，通过 `StateFlow<QueueUiState>` 暴露 `current / pending / lastFinished`。
+- `submit` 入队后确保前台服务运行；服务 `startLoop` 串行 `takeNext`，每个任务在子协程中执行并 `join()`，因此取消只影响当前任务，队列继续。
+- `takeNext` 与 `onLoopExhausted` 在同一把锁内判断队列是否为空，避免“刚入队、服务已退出”的竞态。
+- 循环退出前用 `stopSelfResult(lastStartId)` 并复查待处理队列，并发提交带来的新 startId 会让服务继续运行，不会把新任务一起停掉。
+- 首页与队列页调用 `resume`，尝试重启因异常中断、但进程仍存活的服务。
+- 通知标题为当前文件名，副标题显示剩余队列数，操作按钮为“取消当前”。
+
+### 9.2 历史
+
+- `HistoryStore`（SharedPreferences + org.json）保留最近 100 条，`StateFlow` 驱动历史页。
+- 每条记录包含状态、完成时间、源文件名、目标摘要、输出 URI/文件名、错误信息与 `SpecSnapshot`。
+- `SpecSnapshot` 只保存格式矩阵中的 id（容器 / 编码 / 分辨率 / 质量），读取时经 `FormatCatalog` 还原；矩阵变更导致 id 失效时，“再次转换”提示不可用。
+- 历史页支持单条删除、清空（二次确认）；失败 / 取消记录可“再次转换”，入队后跳转队列页。
+
+### 9.3 设置
+
+- `SettingsStore` 持久化输出目录名，`MediaStoreSaver` 写入 `Movies/<目录名>`。
+- 目录名会替换非法字符 `\/:*?"<>|` 为 `_`、去掉首尾点、截断到 40 字符，空值回落到 `视频转换`。
+- 设置页同时提供“转换历史”和“开源许可”入口。
+
+## 10. 错误处理与回退
 
 | 场景 | 行为 |
 | --- | --- |
@@ -187,18 +213,18 @@ Media3 运行期失败且用户未取消时，服务自动改用 FFmpeg 重试�
 | 硬件编码器缺失 | 路由阶段直接选 `Ffmpeg(remux=false)` |
 | Media3 运行期失败 | 未取消且 FFmpeg 可用时自动重试一次，通知提示“已切换 FFmpeg 软件编码” |
 | 解码器初始化失败 | 扫描阶段记录为失败项；转换时由 FFmpeg 接管 |
-| 服务启动失败 | `submit` 捕获异常，发布 `Failed`，清空 `pendingSpec` |
+| 服务启动失败 | `submit` 捕获异常，把活动任务与待处理任务全部标记 `Failed` 并写入历史 |
 | 保存失败 | 删除 MediaStore 占位记录，发布 `Failed` |
 | 用户取消 | 发布 `Cancelled`，清理临时文件与通知 |
 
-## 10. 测试策略
+## 11. 测试策略
 
-- 仪器测试位于 `app/src/androidTest`：`Media3EngineTest` 覆盖探测、流拷贝、硬件转码、服务与相册写入；`FfmpegEngineTest` 覆盖 native 库加载与编码、命令构建、进度回调、取消、服务级 MKV 输出；`VideoDecodeScannerTest` 覆盖正常文件通过、损坏容器判定与扫描失败源路由。
+- 仪器测试位于 `app/src/androidTest`：`Media3EngineTest` 覆盖探测、流拷贝、硬件转码、服务与相册写入；`FfmpegEngineTest` 覆盖 native 库加载与编码、命令构建、进度回调、取消、服务级 MKV 输出；`VideoDecodeScannerTest` 覆盖正常文件通过、损坏容器判定与扫描失败源路由；`ConversionQueueTest` 覆盖连续入队、串行完成与历史落盘。
 - 测试素材由 `scripts/` 用桌面 ffmpeg 生成，覆盖各容器/编码组合；Dolby Vision 样本依赖 `tools/dovi_tool`，缺失时脚本跳过。
 - 回归命令：`./gradlew test`、`./gradlew connectedAndroidTest`、`./gradlew lint`。
 - 真机回归关注：格式矩阵逐项可转换、取消后无残留文件/通知、输出能在相册播放。
 
-## 11. FFmpeg 接入（M3.4）
+## 12. FFmpeg 接入（M3.4）
 
 - **构建**：`scripts/ffmpeg-download.sh` 下载并校验源码，`scripts/ffmpeg-build.sh` 交叉编译静态库到 `ffmpeg/prebuilt/<abi>/`；`app/build.gradle.kts` 的 `externalNativeBuild` 调用 `ffmpeg/jni/CMakeLists.txt` 链接出 `libffmpeg_jni.so`。当前产物只覆盖 arm64-v8a，因此 `abiFilters` 也只保留该 ABI。
 - **复用 fftools CLI**：`ffmpeg.c` 编译时把 `main` 改名为 `ffmpeg_main`，JNI 直接调用。FFmpeg 9 的该路径不会 `exit()`；但 `ffmpeg_cleanup` 不会清零 `nb_input_files` / `nb_output_files` / `nb_filtergraphs` / `nb_decoders`，JNI 每次运行前手动复位，避免第二次转换状态错乱。
@@ -207,26 +233,28 @@ Media3 运行期失败且用户未取消时，服务自动改用 FFmpeg 重试�
 - **链接**：静态库互相引用，使用 `-Wl,--start-group/--end-group`；x265 需要 `c++_static` / `c++abi`；`-Wl,-Bsymbolic` 解决 NEON 汇编数据符号在 .so 中的可抢占重定位；`-Wl,-z,max-page-size=16384` 满足 16KB 页要求。
 - **输入与输出**：`content://` 通过 `/proc/self/fd/N` 交给 FFmpeg；输出写缓存临时文件并复用 `MediaStoreSaver`，结束后清理。
 
-## 12. 已知限制
+## 13. 已知限制
 
 - FFmpeg 原生库只有 arm64-v8a，其他 ABI 设备只能走 Media3 快路径。
 - x265 为 8-bit 构建，10-bit HDR / 部分 Dolby Vision 源转码时会降到 8-bit；Dolby Vision 原样封装需目标为 MP4 + H.265 + 自动质量。
 - 软件转码速度受设备 CPU 限制，4K 长视频可能明显发热。
-- `ConversionController` 只支持单任务，无队列、无历史、无重试（M4）。
+- 队列只存在于进程内：进程被杀后未完成任务丢失（历史仍保留，可手动“再次转换”）。
+- 历史最多保留 100 条；若用户在相册中删除输出文件，记录中的 URI 会失效。
 - 保存阶段会再完整拷贝一次输出文件，大文件有额外 IO 开销。
-- 前台服务运行期若进程被杀，任务不会恢复。
 
-## 13. 目录结构
+## 14. 目录结构
 
 ```
 app/src/main/java/com/yuarmy/videoconvert/
-  data/        MediaProbe、VideoDecodeScanner、MediaStoreSaver
+  VideoConvertApp.kt  安装历史 / 设置存储
+  data/        MediaProbe、VideoDecodeScanner、MediaStoreSaver、
+               ConversionHistory（HistoryStore）、SettingsStore
   domain/model VideoInfo、ConversionSpec、FormatCatalog、JobState、CodecNames
   engine/      ConversionEngine、ConversionPlanner、EngineRouter、
                Media3Engine、FfmpegEngine、FfmpegNative、FfmpegCommand、FfmpegProgressParser
-  service/     ConversionController、ConversionService
-  ui/          navigation、home、convert、job、scan、settings、common、theme
-app/src/androidTest/  Media3EngineTest、FfmpegEngineTest、VideoDecodeScannerTest
+  service/     ConversionController（队列）、ConversionService（串行消费）
+  ui/          navigation、home、convert、job（队列）、history、scan、settings、license、common、theme
+app/src/androidTest/  Media3EngineTest、FfmpegEngineTest、VideoDecodeScannerTest、ConversionQueueTest
 scripts/       FFmpeg 构建脚本、测试素材生成脚本
 ffmpeg/        自编译静态库、JNI 源码与 CMake 构建定义
 ```

@@ -37,11 +37,12 @@ object MediaStoreSaver {
         source: File,
         displayName: String,
         mimeType: String,
+        relativeFolder: String = SettingsStore.DEFAULT_OUTPUT_FOLDER,
     ): Uri {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            saveScoped(context, source, displayName, mimeType)
+            saveScoped(context, source, displayName, mimeType, relativeFolder)
         } else {
-            saveLegacy(context, source, displayName, mimeType)
+            saveLegacy(context, source, displayName, mimeType, relativeFolder)
         }
     }
 
@@ -51,12 +52,13 @@ object MediaStoreSaver {
         source: File,
         displayName: String,
         mimeType: String,
+        relativeFolder: String,
     ): Uri {
         val resolver = context.contentResolver
         val values = ContentValues().apply {
             put(MediaStore.Video.Media.DISPLAY_NAME, displayName)
             put(MediaStore.Video.Media.MIME_TYPE, mimeType)
-            put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/视频转换")
+            put(MediaStore.Video.Media.RELATIVE_PATH, "${Environment.DIRECTORY_MOVIES}/$relativeFolder")
             put(MediaStore.Video.Media.IS_PENDING, 1)
         }
         val collection = MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
@@ -87,10 +89,11 @@ object MediaStoreSaver {
         source: File,
         displayName: String,
         mimeType: String,
+        relativeFolder: String,
     ): Uri {
         val directory = File(
             Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MOVIES),
-            "视频转换",
+            relativeFolder,
         )
         if (!directory.exists() && !directory.mkdirs()) {
             throw IOException("无法创建输出目录")

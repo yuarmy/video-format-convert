@@ -26,10 +26,10 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.yuarmy.videoconvert.service.ConversionController
 import com.yuarmy.videoconvert.ui.convert.ConvertScreen
+import com.yuarmy.videoconvert.ui.history.HistoryScreen
 import com.yuarmy.videoconvert.ui.home.HomeScreen
-import com.yuarmy.videoconvert.ui.job.JobScreen
+import com.yuarmy.videoconvert.ui.job.QueueScreen
 import com.yuarmy.videoconvert.ui.license.LicenseScreen
 import com.yuarmy.videoconvert.ui.scan.ScanScreen
 import com.yuarmy.videoconvert.ui.settings.SettingsScreen
@@ -40,6 +40,7 @@ object Routes {
     const val SCAN = "scan"
     const val CONVERT = "convert?uri={uri}&scan={scan}&reason={reason}"
     const val JOB = "job"
+    const val HISTORY = "history"
     const val LICENSES = "licenses"
 
     fun convert(uri: Uri, scan: Boolean = false, reason: String? = null): String {
@@ -57,6 +58,7 @@ fun AppNavHost() {
             HomeScreen(
                 onVideoPicked = { uri -> navController.navigate(Routes.convert(uri)) },
                 onScan = { navController.navigate(Routes.SCAN) },
+                onOpenQueue = { navController.navigate(Routes.JOB) },
                 onOpenSettings = { navController.navigate(Routes.SETTINGS) },
             )
         }
@@ -97,16 +99,21 @@ fun AppNavHost() {
             )
         }
         composable(Routes.JOB) {
-            JobScreen(
-                onDone = {
-                    ConversionController.reset()
-                    navController.popBackStack(Routes.HOME, inclusive = false)
-                },
+            QueueScreen(
+                onBack = { navController.popBackStack() },
+                onOpenHistory = { navController.navigate(Routes.HISTORY) },
+            )
+        }
+        composable(Routes.HISTORY) {
+            HistoryScreen(
+                onBack = { navController.popBackStack() },
+                onRetried = { navController.navigate(Routes.JOB) },
             )
         }
         composable(Routes.SETTINGS) {
             SettingsScreen(
                 onBack = { navController.popBackStack() },
+                onOpenHistory = { navController.navigate(Routes.HISTORY) },
                 onOpenLicenses = { navController.navigate(Routes.LICENSES) },
             )
         }

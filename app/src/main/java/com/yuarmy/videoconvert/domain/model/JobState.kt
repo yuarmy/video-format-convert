@@ -24,6 +24,8 @@ import android.net.Uri
 sealed interface JobState {
     data object Idle : JobState
 
+    data object Queued : JobState
+
     data object Preparing : JobState
 
     data class Running(

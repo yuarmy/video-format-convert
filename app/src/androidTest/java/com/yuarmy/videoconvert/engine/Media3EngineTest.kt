@@ -25,6 +25,7 @@ import android.net.Uri
 import android.provider.MediaStore
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.yuarmy.videoconvert.data.HistoryStore
 import com.yuarmy.videoconvert.data.MediaProbe
 import com.yuarmy.videoconvert.data.MediaStoreSaver
 import com.yuarmy.videoconvert.domain.model.AudioCodecs
@@ -161,24 +162,27 @@ class Media3EngineTest {
             resolution = FormatCatalog.resolutions.first { it.maxHeight == null },
             quality = Quality.AUTO,
         )
-        ConversionController.submit(context, spec)
+        val jobId = ConversionController.submit(context, spec)
 
-        val terminal = withTimeout(60_000) {
+        val finished = withTimeout(60_000) {
             ConversionController.state.first { state ->
-                state is JobState.Success || state is JobState.Failed || state is JobState.Cancelled
+                val result = state.lastFinished?.state
+                result is JobState.Success || result is JobState.Failed || result is JobState.Cancelled
             }
-        }
+        }.lastFinished!!.state
 
-        assertTrue("service ended in $terminal", terminal is JobState.Success)
-        val success = terminal as JobState.Success
         try {
+            assertTrue("service ended in $finished", finished is JobState.Success)
+            val success = finished as JobState.Success
             val saved = context.contentResolver.openInputStream(success.outputUri)
                 ?.use { it.readBytes() }
             assertNotNull(saved)
             assertTrue(saved!!.isNotEmpty())
-        } finally {
             context.contentResolver.delete(success.outputUri, null, null)
+        } finally {
+            HistoryStore.remove(jobId)
         }
+        Unit
     }
 
     @Test
@@ -188,19 +192,24 @@ class Media3EngineTest {
             resolution = ResolutionOption(480, "480p"),
             quality = Quality.HIGH,
         )
-        ConversionController.submit(context, spec)
+        val jobId = ConversionController.submit(context, spec)
 
-        withTimeout(10_000) {
-            ConversionController.state.first { it is JobState.Running }
-        }
-        ConversionController.cancel(context)
-
-        val terminal = withTimeout(30_000) {
-            ConversionController.state.first { state ->
-                state is JobState.Cancelled || state is JobState.Failed || state is JobState.Success
+        try {
+            withTimeout(10_000) {
+                ConversionController.state.first { it.current?.state is JobState.Running }
             }
+            ConversionController.cancel(context)
+
+            val finished = withTimeout(30_000) {
+                ConversionController.state.first { state ->
+                    val result = state.lastFinished?.state
+                    result is JobState.Cancelled || result is JobState.Failed || result is JobState.Success
+                }
+            }.lastFinished!!.state
+            assertTrue("service ended in $finished", finished is JobState.Cancelled)
+        } finally {
+            HistoryStore.remove(jobId)
         }
-        assertTrue("service ended in $terminal", terminal is JobState.Cancelled)
     }
 
     @Test
