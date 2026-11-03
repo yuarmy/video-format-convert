@@ -43,6 +43,7 @@ app/                 # 单模块起步
   src/main/java/.../engine/     ConversionEngine、Media3Engine、FfmpegEngine、EngineRouter
   src/main/java/.../data/       SAF/MediaStore、转换历史
   src/main/java/.../service/    前台服务、WorkManager Worker
+  src/main/java/.../report/     设备登录（HTTP）、MQTT 上报、离线队列
 ffmpeg/              # 自编译 .so + JNI 源码/脚本
 scripts/             # FFmpeg 构建脚本、测试素材生成脚本
 docs/                # 架构与模块设计文档
@@ -81,6 +82,15 @@ MVP 不拆多模块；FFmpeg JNI 明显膨胀后再拆 `:ffmpeg`。
 - 转换前查询 `MediaCodecList` 能力，失败自动回退软件编码
 - 新增格式/编码时必须同步更新格式矩阵与 `scripts/` 下的测试素材
 - Dolby Vision 封装：FFmpeg 输出必须用 `.mp4` 扩展（`.mov` 会丢 `dvvC` 配置盒），并加 `-bsf:v dovi_rpu -strict unofficial`；`-shortest` 会导致音轨被丢弃
+- Android 11+ 的 FUSE 会对 `/proc/self/fd/N` 重新按进程身份鉴权，SAF 打开的文件可能 EACCES；`FfmpegEngine` 先实测能否打开，失败则把源拷贝到缓存再转，用完删除
+
+## 上报服务
+
+- 纯可选功能：未登录不产生网络请求；登录信息与待发队列存 SharedPreferences，`installId` 卸载重装才会更换
+- 上报在 IO 协程执行，绝不阻塞转换队列；先落 outbox 再发布，QoS1 成功后删除条目，`eventId` 幂等
+- 上报挂接点是 `ConversionController.recordHistory()`，所有终态都会经过它
+- MQTT 客户端为 Eclipse Paho（不要改用已废弃的 `org.eclipse.paho.android.service`），许可证按 EDL-1.0
+- 当前局域网明文 HTTP/MQTT（`usesCleartextTraffic`），公网部署需改 TLS
 
 ## 代码风格
 

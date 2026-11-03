@@ -22,11 +22,13 @@ package com.yuarmy.videoconvert
 import android.app.Application
 import com.yuarmy.videoconvert.data.HistoryStore
 import com.yuarmy.videoconvert.data.SettingsStore
+import com.yuarmy.videoconvert.report.ReportManager
 
 class VideoConvertApp : Application() {
     override fun onCreate() {
         super.onCreate()
         HistoryStore.install(this)
         SettingsStore.install(this)
+        ReportManager.install(this)
     }
 }

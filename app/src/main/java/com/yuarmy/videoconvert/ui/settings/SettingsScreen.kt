@@ -26,17 +26,21 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -45,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -53,10 +58,16 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.yuarmy.videoconvert.data.SettingsStore
+import com.yuarmy.videoconvert.report.ConnectionState
+import com.yuarmy.videoconvert.report.ReportManager
+import com.yuarmy.videoconvert.report.ReportSettings
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -142,6 +153,8 @@ fun SettingsScreen(
                 }
             }
 
+            ReportServiceCard()
+
             SettingsRow(
                 title = "转换历史",
                 subtitle = "查看记录、再次转换或清空",
@@ -152,6 +165,109 @@ fun SettingsScreen(
                 subtitle = "GPL-3.0-or-later · 第三方组件",
                 onClick = onOpenLicenses,
             )
+        }
+    }
+}
+
+@Composable
+private fun ReportServiceCard() {
+    val reportState by ReportManager.uiState.collectAsStateWithLifecycle()
+    var serverUrl by rememberSaveable { mutableStateOf(ReportSettings.serverUrl.value) }
+    var enrollToken by rememberSaveable { mutableStateOf("") }
+
+    LaunchedEffect(reportState.loggedIn) {
+        if (reportState.loggedIn) {
+            enrollToken = ""
+        }
+    }
+
+    val statusText = when {
+        reportState.busy -> "登录中…"
+        reportState.loggedIn -> when (reportState.connection) {
+            ConnectionState.CONNECTED -> "已连接"
+            ConnectionState.CONNECTING -> "连接中…"
+            ConnectionState.DISCONNECTED -> "未连接，将自动重试"
+        }
+        reportState.error != null -> reportState.error.orEmpty()
+        else -> "未登录"
+    }
+    val statusColor = if (reportState.error != null && !reportState.loggedIn) {
+        MaterialTheme.colorScheme.error
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    ElevatedCard(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                text = "上报服务",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = "登录后，每次转换结束会把设备信息与结果推送到服务端看板。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            OutlinedTextField(
+                value = serverUrl,
+                onValueChange = { serverUrl = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("服务器地址") },
+                placeholder = { Text("http://192.168.1.10:3000") },
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            )
+            OutlinedTextField(
+                value = enrollToken,
+                onValueChange = { enrollToken = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text("注册码") },
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+            )
+            Text(
+                text = statusText,
+                style = MaterialTheme.typography.bodySmall,
+                color = statusColor,
+            )
+            reportState.deviceId?.let { deviceId ->
+                Text(
+                    text = "设备 ID：$deviceId",
+                    style = MaterialTheme.typography.bodySmall,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (reportState.loggedIn) {
+                    OutlinedButton(onClick = { ReportManager.logout() }) {
+                        Text("退出")
+                    }
+                }
+                Spacer(Modifier.weight(1f))
+                Button(
+                    onClick = { ReportManager.login(serverUrl, enrollToken) },
+                    enabled = !reportState.busy && serverUrl.isNotBlank() && enrollToken.isNotBlank(),
+                ) {
+                    if (reportState.busy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(16.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        Text(if (reportState.loggedIn) "重新登录" else "登录")
+                    }
+                }
+            }
         }
     }
 }

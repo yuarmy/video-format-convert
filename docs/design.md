@@ -135,6 +135,7 @@ Media3 运行期失败且用户未取消时，服务自动改用 FFmpeg 重试�
 
 - **JNI 封装**：`ffmpeg/jni/CMakeLists.txt` 把 FFmpeg 静态库与 fftools 源码（`ffmpeg.c` 以 `main=ffmpeg_main` 改名编译）链接成 `libffmpeg_jni.so`；`FfmpegNative.run()` 阻塞执行一条命令，`cancel()` 置位 native 信号标志中断转码。
 - **输入**：`ContentResolver.openFileDescriptor(uri, "r")` 在整个转换期间保持 fd 打开，命令行传 `/proc/self/fd/N`。
+- **FUSE 兜底**：Android 11+ 在 FFmpeg 重新打开 `/proc/self/fd/N` 时会按本进程身份再次鉴权，SAF 授权的文件可能返回 `EACCES`。引擎先用 `FileInputStream` 实测该路径，打不开就流式拷贝到 `cacheDir/inputs/` 再转，结束后删除；拷贝期间检查取消标志。
 - **输出**：仍写 `cacheDir/conversions/<timestamp>.<ext>`；Dolby Vision 强制 `.mp4`，避免丢失 `dvvC` 配置盒。
 - **命令**：`FfmpegCommand` 按容器 / 编码 / 质量生成参数。视频 H.264→libx264、H.265→libx265、VP8→libvpx、VP9→libvpx-vp9、AV1→libsvtav1、MPEG-4/2→内置编码器；音频 AAC/MP3/Opus/Vorbis/FLAC/AC-3/PCM 同理。可拷贝的轨道用 `-c:v copy` / `-c:a copy`，缩放用 `-vf scale=-2:H,setsar=1`，MP4/MOV 加 `+faststart`，H.265 打 `hvc1` 标签。
 - **质量**：H.264 / H.265 / VP8 / VP9 / AV1 用 CRF（高质量 / 均衡 / 小体积三档），MPEG-4/2 按目标像素量估算码率。
@@ -203,7 +204,17 @@ Media3 运行期失败且用户未取消时，服务自动改用 FFmpeg 重试�
 
 - `SettingsStore` 持久化输出目录名，`MediaStoreSaver` 写入 `Movies/<目录名>`。
 - 目录名会替换非法字符 `\/:*?"<>|` 为 `_`、去掉首尾点、截断到 40 字符，空值回落到 `视频转换`。
-- 设置页同时提供“转换历史”和“开源许可”入口。
+- 设置页同时提供“上报服务”“转换历史”和“开源许可”入口。
+
+### 9.4 上报服务（可选）
+
+- `ReportManager` 是 Application 级单例，`VideoConvertApp.onCreate` 调用 `install()`；已登录时在 IO 协程自动建立 MQTT 连接，无需打开页面。
+- 登录：设置页填服务器地址与注册码 → `LoginApi` 用 `HttpURLConnection` 调 `POST /api/device/v1/login` → 保存 `deviceId` 与服务端签发的 MQTT 凭据（SharedPreferences）。同一 `installId` 重复登录返回同一设备。
+- 设备信息：连接成功（含自动重连）后发布一条 `device_info`，覆盖 App 版本、厂商、机型、Android 版本、SDK、ABI。
+- 转换结果：挂接在 `ConversionController.recordHistory()`，所有终态（成功 / 失败 / 取消 / 中断）都会生成 `conversion_result`，包含源文件名与元数据、目标配置、起止时间、耗时与错误。
+- 可靠性：先写入 `ReportOutbox`（SharedPreferences，上限 200 条，超出丢最旧）再发布；QoS1 收到 PUBACK 后删除条目，服务端用 `eventId` 幂等。断网或进程被杀后，下次连接自动补发。
+- 状态：`ReportUiState(loggedIn, deviceId, connection, busy, error)` 驱动设置页文案；连接失败由 Paho 自动重连，不阻塞转换。
+- 退出登录清除凭据与待发队列（避免旧账号数据串号），保留 `installId`。
 
 ## 10. 错误处理与回退
 
@@ -233,7 +244,7 @@ Media3 运行期失败且用户未取消时，服务自动改用 FFmpeg 重试�
 - **取消**：CMake 在配置阶段去掉 `ffmpeg.c` 中 `received_sigterm` / `received_nb_signals` 的 `static`，JNI 取消时置 2（大于 `transcode_init_done`），让 AVIO 中断回调与转码循环立即退出。
 - **日志与进度**：`av_log_set_callback` 收到的日志用 `av_log_format_line2` 格式化后回调 Kotlin；FFmpeg 工作线程通过 `AttachCurrentThread` + pthread key 析构自动 detach。进度解析 `time=` / `speed=` 统计行。
 - **链接**：静态库互相引用，使用 `-Wl,--start-group/--end-group`；x265 需要 `c++_static` / `c++abi`；`-Wl,-Bsymbolic` 解决 NEON 汇编数据符号在 .so 中的可抢占重定位；`-Wl,-z,max-page-size=16384` 满足 16KB 页要求。
-- **输入与输出**：`content://` 通过 `/proc/self/fd/N` 交给 FFmpeg；输出写缓存临时文件并复用 `MediaStoreSaver`，结束后清理。
+- **输入与输出**：`content://` 优先通过 `/proc/self/fd/N` 交给 FFmpeg，FUSE 拒绝时拷贝到缓存；输出写缓存临时文件并复用 `MediaStoreSaver`，结束后清理。
 
 ## 13. 已知限制
 
@@ -242,6 +253,8 @@ Media3 运行期失败且用户未取消时，服务自动改用 FFmpeg 重试�
 - 软件转码速度受设备 CPU 限制，4K 长视频可能明显发热。
 - 队列只存在于进程内：进程被杀后未完成任务丢失（历史仍保留，可手动“再次转换”）。
 - 历史最多保留 100 条；若用户在相册中删除输出文件，记录中的 URI 会失效。
+- 上报为局域网明文 HTTP/MQTT，凭据与内容可被嗅探；公网必须换 TLS。
+- 待发队列上限 200 条，超出丢弃最旧记录；进程被系统杀死时，正在生成的消息可能未及落盘。
 - 保存阶段会再完整拷贝一次输出文件，大文件有额外 IO 开销。
 
 ## 14. 目录结构
@@ -255,6 +268,7 @@ app/src/main/java/com/yuarmy/videoconvert/
   engine/      ConversionEngine、ConversionPlanner、EngineRouter、
                Media3Engine、FfmpegEngine、FfmpegNative、FfmpegCommand、FfmpegProgressParser
   service/     ConversionController（队列）、ConversionService（串行消费）
+  report/      DeviceInfo、ReportSettings、LoginApi、ReportPayload、ReportOutbox、MqttReporter、ReportManager
   ui/          navigation、home、convert、job（队列）、history、scan、settings、license、common、theme
 app/src/androidTest/  Media3EngineTest、FfmpegEngineTest、VideoDecodeScannerTest、
                       ConversionQueueTest、FormatMatrixTest、PerformanceTest

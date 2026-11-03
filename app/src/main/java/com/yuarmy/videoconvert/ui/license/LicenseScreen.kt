@@ -87,6 +87,7 @@ internal data class LicenseDoc(
 
 private const val GPL_TEXT = "licenses/gpl-3.0.txt"
 private const val APACHE_TEXT = "licenses/apache-2.0.txt"
+private const val EDL_TEXT = "licenses/eclipse-distribution-license-1.0.txt"
 
 private val LicenseDocs = listOf(
     LicenseDoc(
@@ -112,6 +113,14 @@ private val LicenseDocs = listOf(
         license = "Apache-2.0",
         assetPath = APACHE_TEXT,
         sourceUrl = "https://www.apache.org/licenses/LICENSE-2.0",
+    ),
+    LicenseDoc(
+        id = "paho",
+        name = "Eclipse Paho MQTT",
+        description = "设备登录后的 MQTT 上报客户端",
+        license = "EPL-2.0 / EDL-1.0（按 EDL-1.0 使用）",
+        assetPath = EDL_TEXT,
+        sourceUrl = "https://www.eclipse.org/paho/",
     ),
     LicenseDoc(
         id = "androidx",

@@ -27,6 +27,7 @@ import com.yuarmy.videoconvert.domain.model.VideoInfo
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 
 class FfmpegEngine(private val context: Context) : ConversionEngine {
 
@@ -61,14 +62,19 @@ class FfmpegEngine(private val context: Context) : ConversionEngine {
         output.delete()
 
         var descriptor: android.os.ParcelFileDescriptor? = null
+        var stagedInput: File? = null
         try {
             descriptor = context.contentResolver.openFileDescriptor(spec.source.uri, "r")
                 ?: return@withContext ConversionResult.Failure("无法打开所选视频")
 
+            val input = stageInputIfNeeded(spec.source.uri, descriptor.fd)
+                ?: return@withContext ConversionResult.Cancelled
+            stagedInput = input.temporaryFile
+
             val parser = FfmpegProgressParser(spec.source.durationMs, onProgress)
             val args = FfmpegCommand.build(
                 spec = spec,
-                inputPath = "/proc/self/fd/${descriptor.fd}",
+                inputPath = input.path,
                 outputPath = output.absolutePath,
                 plan = plan,
             )
@@ -96,7 +102,46 @@ class FfmpegEngine(private val context: Context) : ConversionEngine {
             ConversionResult.Failure(error.message ?: "FFmpeg 转换失败", error)
         } finally {
             descriptor?.close()
+            stagedInput?.delete()
         }
+    }
+
+    private class Input(val path: String, val temporaryFile: File?)
+
+    /**
+     * Android 11+ 的 FUSE 在 FFmpeg 重新打开 `/proc/self/fd/N` 时会按本进程身份鉴权，
+     * SAF 授权打开的文件可能直接返回 EACCES。先实测能否打开，不行就拷贝到缓存再转。
+     */
+    private fun stageInputIfNeeded(uri: Uri, fd: Int): Input? {
+        val fdPath = "/proc/self/fd/$fd"
+        if (runCatching { FileInputStream(fdPath).close() }.isSuccess) {
+            return Input(fdPath, temporaryFile = null)
+        }
+
+        val target = File(context.cacheDir, "inputs/${System.currentTimeMillis()}.src")
+        target.parentFile?.mkdirs()
+        try {
+            val source = context.contentResolver.openInputStream(uri)
+                ?: throw IllegalStateException("无法读取所选视频")
+            source.use { input ->
+                target.outputStream().use { output ->
+                    val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    while (true) {
+                        if (cancelled) {
+                            target.delete()
+                            return null
+                        }
+                        val read = input.read(buffer)
+                        if (read < 0) break
+                        output.write(buffer, 0, read)
+                    }
+                }
+            }
+        } catch (error: Throwable) {
+            target.delete()
+            throw error
+        }
+        return Input(target.absolutePath, temporaryFile = target)
     }
 
     override fun cancel() {

@@ -28,6 +28,7 @@ import com.yuarmy.videoconvert.data.HistoryStore
 import com.yuarmy.videoconvert.data.SpecSnapshot
 import com.yuarmy.videoconvert.domain.model.ConversionSpec
 import com.yuarmy.videoconvert.domain.model.JobState
+import com.yuarmy.videoconvert.report.ReportManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,6 +37,7 @@ data class QueueJob(
     val id: Long,
     val spec: ConversionSpec,
     val state: JobState = JobState.Queued,
+    val startedAtMs: Long? = null,
 )
 
 data class QueueUiState(
@@ -122,7 +124,7 @@ object ConversionController {
 
     internal fun takeNext(): QueueJob? = synchronized(lock) {
         val next = pending.removeFirstOrNull() ?: return null
-        val started = next.copy(state = JobState.Preparing)
+        val started = next.copy(state = JobState.Preparing, startedAtMs = System.currentTimeMillis())
         active = started
         publishLocked()
         started
@@ -239,6 +241,12 @@ object ConversionController {
             spec = SpecSnapshot.from(job.spec),
         )
         HistoryStore.record(entry)
+        ReportManager.onConversionFinished(
+            spec = job.spec,
+            state = state,
+            jobId = job.id,
+            startedAtMs = job.startedAtMs,
+        )
     }
 
     private fun targetSummary(spec: ConversionSpec): String = buildString {
